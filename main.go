@@ -3,8 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"reflect"
 
-	bencode "github.com/jackpal/bencode-go"
+	"github.com/ritwik310/torrent-client/bencode"
 )
 
 func main() {
@@ -12,23 +13,27 @@ func main() {
 		fmt.Println("no torrent file provided")
 		return
 	}
+	fn := os.Args[1]
 
-	readTorr(os.Args[1])
-}
-
-func readTorr(p string) {
-	// reading a torrent file
-	f, err := os.Open(p)
+	torr, err := bencode.ReadTorrent(fn)
 	if err != nil {
-		fmt.Println("couldn't read the torrent file", err)
+		fmt.Println("couldn't read/decode the torrent file data", err)
 	}
 
-	// decoding torrent file data
-	torr, err := bencode.Decode(f)
-	if err != nil {
-		fmt.Println("couldn't decode the torrent file data", err)
+	var pieces string
+
+	if info, ok := torr["info"].(map[string]interface{}); ok {
+		for key, val := range info {
+			if key == "pieces" {
+				fmt.Println("original type of info[\"pieces\"]:", reflect.TypeOf(val))
+				pieces = val.(string)
+			}
+		}
+
+		// fmt.Printf("%s\n", y["pieces"])
 	}
 
-	// printing result
-	fmt.Printf("%+v\n", torr)
+	fmt.Println("len:", len(pieces))
+	fmt.Printf("%#x\n", pieces)
+
 }
