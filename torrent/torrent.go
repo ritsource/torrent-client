@@ -89,6 +89,8 @@ func infohash(info interface{}) []byte {
 
 // genpeerid generates a somewhat random peerid (not best solution)
 func genpeerid() string {
+	return "-qB3130-kwsSnUYwydys"
+
 	var r string
 	for i := 0; i < 12; i++ {
 		r += strconv.Itoa(rand.Intn(9))
