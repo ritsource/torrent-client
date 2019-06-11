@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"net/http"
 )
 
@@ -13,16 +14,25 @@ func main() {
 
 	// }
 
-	tracker := "http://bt1.archive.org:6969/announce?compact=1&downloaded=0&infohash=%5E3tV%85%8DUj%14%D5%9Be%AE1%2CrH%E6%BA%C7&left=%F2%80%80%80&peerID=%EF%BF%BD&port=6889&uploaded=0"
-	resp, err := http.Get(tracker)
+	tracker := "http://torrent.ubuntu.com:6969/announce?info_hash=%90%28%9F%D3M%FC%1C%F8%F3%16%A2h%AD%D85L%853DX&peer_id=-PC0001-381828927258&port=6889&uploaded=0&downloaded=0&left=699400192&compact=1"
 
-	// conn, err := net.Dial("tcp", "[http://torrent.ubuntu.com]:6969/announce")
+	resp, err := http.Get(tracker)
 	if err != nil {
-		fmt.Println("Error:", err)
-		return
+		panic(err)
 	}
 
-	fmt.Println("resp:\n", resp)
+	defer resp.Body.Close()
+
+	fmt.Println("resp:\n", resp.Body)
+
+	if resp.StatusCode == http.StatusOK {
+		bodyBytes, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			panic(err)
+		}
+		bodyString := string(bodyBytes)
+		fmt.Printf("%+v\n", bodyString)
+	}
 
 	// // raddr, err := net.ResolveUDPAddr("udp", "[http://torrent.ubuntu.com]:6969/announce")
 	// // if err != nil {
