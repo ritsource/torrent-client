@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
@@ -16,12 +17,12 @@ type Client struct {
 	Addr string
 }
 
-func (c *Client) Send() error {
-	p := make([]byte, 2048)
+func (c *Client) Send() ([]byte, error) {
+	p := make([]byte, 16)
 
 	conn, err := net.Dial("udp", c.Addr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer conn.Close()
 
@@ -32,13 +33,21 @@ func (c *Client) Send() error {
 	_, err = bufio.NewReader(conn).Read(p)
 	if err != nil {
 		fmt.Println("err")
-		return err
+		return nil, err
 	}
 
-	fmt.Println("4")
+	// fmt.Println("4")
+	// fmt.Printf("action%+s\n", binary.BigEndian.Uint32(p[0:4]))
+	// fmt.Printf("transaction_id%+s\n", binary.BigEndian.Uint32(p[4:8]))
+	// fmt.Printf("connection_id%+s\n", binary.BigEndian.Uint64(p[8:16]))
+	// fmt.Printf("action%+s\n", lib)
+	return p, nil
+}
 
-	fmt.Printf("%s\n", p)
-	return nil
+func tempread32(b []byte, v int32) error {
+	buf := bytes.NewBuffer(b)
+	err := binary.Read(buf, binary.BigEndian, v)
+	return err
 }
 
 func (c *Client) Send2() error {
@@ -59,6 +68,15 @@ func (c *Client) Send2() error {
 	if err != nil && err != context.Canceled {
 		panic(err)
 	}
+
+	var b []byte
+	_, err = reader.Read(b)
+	if err != nil {
+		fmt.Println("::::::::")
+		return err
+	}
+
+	fmt.Printf("%+v\n", b)
 
 	return nil
 }

@@ -170,6 +170,8 @@ func client(ctx context.Context, address string, reader io.Reader) (err error) {
 		fmt.Printf("packet-received: bytes=%d from=%s\n",
 			nRead, addr.String())
 
+		// fmt.Printf("Buffer %+v\n", addr)
+
 		doneChan <- nil
 	}()
 
