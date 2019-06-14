@@ -9,7 +9,8 @@ import (
 // Torr represents mets data from the torrent file
 type Torr map[string]interface{}
 
-// ReadFile ...
+// ReadFile reads torrent file from the provided filepath,
+// decodes bencode data and populates Torr properties (metainfo & info)
 func (t *Torr) ReadFile(fp string) error {
 	// reading a torrent file
 	f, err := os.Open(fp)

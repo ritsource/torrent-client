@@ -60,6 +60,9 @@ func main() {
 
 		fmt.Println("interval:", interval)
 
+	case "http":
+		tracker.AnnounceHTTP()
+
 	default:
 		fmt.Printf("unsupported announce protocol, %v\n", ann.Scheme)
 	}
