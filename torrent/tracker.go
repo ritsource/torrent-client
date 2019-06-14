@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 
+	"github.com/ritwik310/torrent-client/src"
 	"github.com/ritwik310/torrent-client/udp"
 )
 
@@ -42,39 +43,45 @@ func trackerrequest(torr *map[string]interface{}) {
 
 	switch ann.Scheme {
 	case "udp":
+		t := src.Tracker{}
+		transaction_id, connection_id, err := t.ConnUDP(ann.Host, 888888)
 
-		client1 := connectionreq(ann.Host, 908980)
+		// return
 
-		by, err := trackerudp(&client1)
+		// client1 := connectionreq(ann.Host, 908980)
+
+		// by, err := trackerudp(&client1)
 		if err != nil {
 			fmt.Println("Error:", err)
 			return
 		}
 
-		fmt.Println("len of by:", len(by))
+		// fmt.Println("len of by:", len(by))
 
-		action := binary.BigEndian.Uint32(by[0:4])
-		transaction_id := binary.BigEndian.Uint32(by[4:8])
-		connection_id := binary.BigEndian.Uint64(by[8:16])
+		// action := binary.BigEndian.Uint32(by[0:4])
+		// transaction_id := binary.BigEndian.Uint32(by[4:8])
+		// connection_id := binary.BigEndian.Uint64(by[8:16])
 
-		fmt.Printf("haha - action:, %+v\n", action)
+		// fmt.Printf("haha - action:, %+v\n", action)
 		fmt.Printf("haha - transaction_id:, %+v\n", transaction_id)
 		fmt.Printf("haha - connection_id:, %+v\n", connection_id)
 
-		client2 := announce(ann.Host, connection_id, transaction_id, torr)
+		_, err = t.AnnounceUDP(ann.Host, transaction_id, connection_id)
 
-		data, err := client2.Send()
+		// client2 := announce(ann.Host, connection_id, transaction_id, torr)
+
+		// data, err := client2.Send()
 		if err != nil {
 			fmt.Println("Error:", err)
 			return
 		}
 
-		fmt.Printf("data:%v\n", len(data))
+		// fmt.Printf("data:%v\n", len(data))
 
-		fmt.Printf("action:%v\n", binary.BigEndian.Uint32(data[:4]))
-		fmt.Printf("transaction_id:%v\n", binary.BigEndian.Uint32(data[4:8]))
-		fmt.Printf("interval:%v\n", binary.BigEndian.Uint32(data[8:12]))
-		fmt.Printf("leechers:%v\n", binary.BigEndian.Uint32(data[12:16]))
+		// fmt.Printf("action:%v\n", binary.BigEndian.Uint32(data[:4]))
+		// fmt.Printf("transaction_id:%v\n", binary.BigEndian.Uint32(data[4:8]))
+		// fmt.Printf("interval:%v\n", binary.BigEndian.Uint32(data[8:12]))
+		// fmt.Printf("leechers:%v\n", binary.BigEndian.Uint32(data[12:16]))
 		// fmt.Printf("seeders:%v\n", binary.BigEndian.Uint32(data[16:20]))
 
 	case "http":
@@ -127,7 +134,7 @@ func announce(addr string, connid uint64, tid uint32, torr *map[string]interface
 	binary.BigEndian.PutUint32(event, 2)
 	binary.BigEndian.PutUint32(ip, 0)
 	binary.BigEndian.PutUint32(key, 12345)
-	binary.BigEndian.PutUint32(num_want, 0)
+	binary.BigEndian.PutUint32(num_want, 100)
 	binary.BigEndian.PutUint16(port, 6888)
 
 	var msg []byte
@@ -172,15 +179,26 @@ func connectionreq(addr string, tid uint32) udp.Client {
 	}
 }
 
-func trackerudp(client *udp.Client) ([]byte, error) {
-	by, err := client.Send()
-	// err := client.Send2()
-	if err != nil {
-		return nil, err
-	}
+// func trackerudp(client *udp.Client) ([]byte, error) {
+// 	// client := src.UDPClient{
+// 	// 	Data: c.Msg,
+// 	// 	Addr: c.Addr,
+// 	// }
 
-	return by, nil
-}
+// 	reader, err := client.Send()
+// 	// err := client.Send2()
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	b := make([]byte, 16)
+// 	_, err = reader.Read(b)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	return b, nil
+// }
 
 func trackerhttp(trkurl string) ([]byte, error) {
 	resp, err := http.Get(trkurl)
