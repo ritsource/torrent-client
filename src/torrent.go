@@ -9,7 +9,8 @@ import (
 // Torr represents mets data from the torrent file
 type Torr map[string]interface{}
 
-func (t *Torr) Read(fp string) error {
+// ReadFile ...
+func (t *Torr) ReadFile(fp string) error {
 	// reading a torrent file
 	f, err := os.Open(fp)
 	if err != nil {
@@ -22,8 +23,8 @@ func (t *Torr) Read(fp string) error {
 		return err
 	}
 
-	torr := Torr(bd)
-	t = &torr
+	// torr := Torr(bd)
+	*t = Torr(bd)
 
 	return nil
 }

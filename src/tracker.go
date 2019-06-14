@@ -14,9 +14,17 @@ import (
 	"github.com/marksamman/bencode"
 )
 
+// NewTracker ...
+func NewTracker(torr *Torr) Tracker {
+	return Tracker{
+		Torr:  torr,
+		Peers: []Peer{},
+	}
+}
+
 // Tracker is
 type Tracker struct {
-	Torr  Torr
+	Torr  *Torr
 	Peers []Peer
 }
 
@@ -24,11 +32,6 @@ type Tracker struct {
 type Peer struct {
 	IP   net.IP
 	Port uint16
-}
-
-// ReadTorr reads data from torrent file
-func (t *Tracker) ReadTorr(fp string) {
-	t.Torr.Read(fp)
 }
 
 // ConnUDP sends connection request to announce address and
@@ -89,7 +92,7 @@ func (t *Tracker) ConnUDP(addr string, tid uint32) (uint32, uint64, error) {
 	// returning as the actual types
 	// TODO: returning as []byte, would be easier for resending the data (ex: connection_id)
 	BE := binary.BigEndian
-	return BE.Uint32(resp[4:12]), BE.Uint64(resp[8:16]), err
+	return BE.Uint32(resp[4:8]), BE.Uint64(resp[8:16]), err
 }
 
 // AnnounceUDP ...
@@ -97,7 +100,7 @@ func (t *Tracker) AnnounceUDP(addr string, tid uint32, cid uint64) (uint32, erro
 	numseed := 20 // number of requested seeders
 
 	// building buffer to be sent with the announce request
-	buf, err := announceDataUDP(&t.Torr, tid, cid, numseed)
+	buf, err := announceDataUDP(t.Torr, tid, cid, numseed)
 	if err != nil {
 		return 0, err
 	}
@@ -169,8 +172,6 @@ func (t *Tracker) AnnounceUDP(addr string, tid uint32, cid uint64) (uint32, erro
 
 	return interval, nil
 }
-
-// func announceRespUDP()
 
 // announceDataUDP takes a *Torr and returns a formatted buffer
 // that contains required elements for UDP announce requests

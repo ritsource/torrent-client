@@ -1,171 +1,67 @@
 package main
 
 import (
-	"crypto/sha1"
 	"fmt"
-	"io"
-	"io/ioutil"
-	"log"
-	"net"
-	"net/http"
 	"net/url"
 	"os"
-	"strconv"
+	"time"
 
-	bencoding "github.com/marksamman/bencode"
-	"github.com/ritwik310/torrent-client/bencode"
-
-	"github.com/ritwik310/torrent-client/torrent"
+	"github.com/ritwik310/torrent-client/src"
 )
 
-func infohash(info interface{}) []byte {
-	enc := bencoding.Encode(info)
-	// dec, _ := bencoding.Decode(bytes.NewReader(enc))
+var transactionID uint32
 
-	// fmt.Printf("%+v\n", dec)
-
-	h := sha1.New()
-	h.Write(enc)
-	hash := h.Sum(nil)
-
-	return hash
-}
-
-func getip() net.IP {
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
-
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-
-	return localAddr.IP
-}
-
-func gethash(str string) []byte {
-	h := sha1.New()
-	io.WriteString(h, str)
-	hash := h.Sum(nil)
-
-	return hash
+func init() {
+	transactionID = uint32(time.Now().Unix()) // WARNING: not sure if a good idea
 }
 
 func main() {
+	// reading command line arguements for torrent file path
 	if len(os.Args) < 2 {
 		fmt.Println("no torrent file provided")
 		return
 	}
-	fn := os.Args[1]
+	fn := os.Args[1] // path to the torrent file
 
-	torrent.Run(fn)
-
-	return
-
-	torr, err := bencode.ReadTorrent(fn)
-	if err != nil {
-		fmt.Println("couldn't read/decode the torrent file data", err)
-	}
-
-	for k := range torr {
-		fmt.Println("Key:", k)
-	}
-
-	fmt.Println(torr["announce"])
-	// return
-
-	// infohash := base64.URLEncoding.EncodeToString(infohash(torr["info"]))
-
-	fmt.Println("LENGTH:", len(infohash(torr["info"])))
-
-	// infohash := base64.StdEncoding.EncodeToString()
-	infohash := infohash(torr["info"])
-
-	// peerID := string(time.Now().Unix())
-
-	peerID := "-qB3130-" + "381828934258"
-
-	fmt.Println("********************", len(peerID))
-	port := "6882"
-	uploaded := "0"
-	downloaded := "0"
-	var left int
-	compact := "1"
-
-	// info := torr["info"]
-
-	if info, ok := torr["info"].(map[string]interface{}); ok {
-		var piecelength int
-		var comblength int
-
-		for key, val := range info {
-			// fmt.Println(key, ":")
-			// fmt.Printf("\n%+v\n\n", val)
-
-			if key == "piece length" {
-				piecelength = int(val.(int64))
-				fmt.Println("piecelength:", piecelength)
-			}
-
-			if key == "pieces" {
-				// fmt.Println("original type of info[\"pieces\"]:", reflect.TypeOf(val))
-
-				fmt.Printf("%v\n", len([]byte(val.(string))))
-				comblength = piecelength * (len([]byte(val.(string))) / 20)
-				fmt.Println("comblength:", comblength)
-			}
-		}
-
-		left = comblength
-		// fmt.Printf("%s\n", "pl", pl)
-	}
-
-	fmt.Printf("info_hash: %#x\n", infohash)
-	// fmt.Println(string(infohash))
-	fmt.Printf("peer_id: %v\n", peerID)
-	fmt.Printf("port: %v\n", port)
-	fmt.Printf("uploaded: %v\n", uploaded)
-	fmt.Printf("downloaded: %v\n", downloaded)
-	fmt.Printf("left: %v\n", left)
-	fmt.Printf("compact: %v\n", compact)
-	// gethash
-	var Url *url.URL
-	Url, err = url.Parse(torr["announce"].(string))
-	if err != nil {
-		panic("boom")
-	}
-
-	// Url.Path += "/announce"
-	parameters := url.Values{}
-	parameters.Add("info_hash", string(infohash))
-	parameters.Add("peer_id", peerID)
-	parameters.Add("port", port)
-	parameters.Add("uploaded", uploaded)
-	parameters.Add("downloaded", downloaded)
-	parameters.Add("left", strconv.Itoa(int(left)))
-	parameters.Add("compact", compact)
-	parameters.Add("event", "started")
-	parameters.Add("ip", "10.13.48.176")
-	Url.RawQuery = parameters.Encode()
-
-	fmt.Printf("Encoded URL is %q\n", Url.String())
-
-	resp, err := http.Get(Url.String())
+	torr := src.Torr{}       // represents torrent metadata
+	err := torr.ReadFile(fn) // populating torr by reading values from file
 	if err != nil {
 		panic(err)
 	}
 
-	defer resp.Body.Close()
+	// tracker
+	tracker := src.NewTracker(&torr)
 
-	fmt.Println("resp:\n", resp)
+	// parsing announce url of tracker, could be udp or http
+	ann, err := url.Parse((*tracker.Torr)["announce"].(string))
+	if err != nil {
+		fmt.Println("unable to parse announce url")
+		panic(err)
+	}
 
-	if resp.StatusCode == http.StatusOK {
-		bodyBytes, err := ioutil.ReadAll(resp.Body)
+	// check protocol
+	switch ann.Scheme {
+	case "udp":
+		// sending connection request to UDP server (the announce host) and reading responses
+		tID, connID, err := tracker.ConnUDP(ann.Host, transactionID)
 		if err != nil {
 			panic(err)
 		}
-		bodyString := string(bodyBytes)
-		fmt.Printf("%+v\n", bodyString)
+		if tID != transactionID {
+			panic(fmt.Sprintf("transaction_id is the request and response did not match %v != %v \n", transactionID, tID))
+		}
+
+		// once connection request is successfule, sending announce request
+		// this will mainly get us a list of seeders for that torrent files
+		interval, err := tracker.AnnounceUDP(ann.Host, tID, connID)
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Println("interval:", interval)
+
+	default:
+		fmt.Printf("unsupported announce protocol, %v\n", ann.Scheme)
 	}
 
 }
