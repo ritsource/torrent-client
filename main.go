@@ -53,7 +53,7 @@ func main() {
 
 		// once connection request is successfule, sending announce request
 		// this will mainly get us a list of seeders for that torrent files
-		interval, err := tracker.AnnounceUDP(ann.Host, tID, connID)
+		interval, err := tracker.GetPeersUDP(ann.Host, tID, connID)
 		if err != nil {
 			panic(err)
 		}
@@ -61,7 +61,7 @@ func main() {
 		fmt.Println("interval:", interval)
 
 	case "http":
-		tracker.AnnounceHTTP()
+		tracker.GetPeersHTTP()
 
 	default:
 		fmt.Printf("unsupported announce protocol, %v\n", ann.Scheme)

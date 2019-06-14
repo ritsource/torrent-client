@@ -6,7 +6,6 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"math/rand"
 	"net"
@@ -37,32 +36,80 @@ type Peer struct {
 	Port uint16
 }
 
-// AnnounceHTTP ...
-func (t *Tracker) AnnounceHTTP() {
+// GetPeersHTTP ...
+func (t *Tracker) GetPeersHTTP() (uint32, error) {
+	// populating tracker announce url with
+	// appropriate param values from the Torr
 	trkurl, err := trackerurl(t.Torr)
 	if err != nil {
-		panic(err)
+		return 0, err
 	}
-	fmt.Println("trakkk:", trkurl)
 
+	// sending http tracker request to trkurl
 	resp, err := http.Get(trkurl)
 	if err != nil {
-		panic(err)
+		return 0, err
 	}
 	defer resp.Body.Close()
 
+	// check if everything has gone ok
 	if resp.StatusCode != http.StatusOK {
-		panic(fmt.Errorf("status-code not 200"))
+		return 0, fmt.Errorf("status-code not 200")
 	}
 
-	var body []byte
-	body, err = ioutil.ReadAll(resp.Body)
+	// The tracker responds with "text/plain" document consisting
+	// of a bencoded dictionary. For more details about tracker response,
+	// https://wiki.theory.org/index.php/BitTorrentSpecification#Tracker_Response
+
+	// decoding response data (bencode)
+	data, err := bencode.Decode(resp.Body)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("%+s\n", body)
+	// check if request faild ("failure reason" exist on the response)
+	if v, ok := data["failure reason"]; ok {
+		fmt.Println("Error: client is not authorized to download the torrent")
+		return 0, fmt.Errorf("%v", v)
+	}
 
+	// Similar to failure reason, but the response still gets processed
+	// normally, this warning message is shown just like an error
+	if v, ok := data["warning message"]; ok {
+		fmt.Printf("WARNING: %s\n", v)
+	}
+
+	// reading the minimum announce interval, if present clients must
+	// not reannounce more frequently than this
+	var interval uint32
+	if v, ok := data["min interval"]; ok {
+		interval = v.(uint32)
+	}
+
+	// the peers value might be a string consisting of multiples of 6 bytes,
+	// first 4 bytes are the IP address and last 2 bytes are the port number,
+	// all in network (big endian) notation.
+	if str, ok := data["peers"].(string); ok {
+		peers := []byte(str)
+		i := 0
+		for {
+			if i >= len(peers) {
+				// if end of string, break
+				break
+			}
+			// reading peer info and appending it the the tracker struct,
+			peer := Peer{IP: net.IP(peers[i : i+4]), Port: binary.BigEndian.Uint16(peers[i+4 : i+6])}
+			t.Peers = append(t.Peers, peer) // appending peer to tracker.Peers
+			// skip the next 6
+			i += 6
+		}
+	}
+
+	// TODO: the peer might also be a dictionary have to handle that case too
+
+	fmt.Printf("%+v\n", t.Peers)
+
+	return interval, nil
 }
 
 // trackerurl returns announce string with all the required param values for tracker request
@@ -157,9 +204,9 @@ func (t *Tracker) ConnUDP(addr string, tid uint32) (uint32, uint64, error) {
 	return BE.Uint32(resp[4:8]), BE.Uint64(resp[8:16]), err
 }
 
-// AnnounceUDP sends a UDP announce request to the server, takes care
+// GetPeersUDP sends a UDP announce request to the server, takes care
 // of formatting request data and populating Tracker with peers and other relevent data
-func (t *Tracker) AnnounceUDP(addr string, tid uint32, cid uint64) (uint32, error) {
+func (t *Tracker) GetPeersUDP(addr string, tid uint32, cid uint64) (uint32, error) {
 	numseed := 20 // number of requested seeders
 
 	// building buffer to be sent with the announce request
