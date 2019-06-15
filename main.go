@@ -2,8 +2,10 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/ritwik310/torrent-client/src"
@@ -33,7 +35,7 @@ func main() {
 	tracker := src.NewTracker(&torr)
 
 	// parsing announce url of tracker, could be udp or http
-	ann, err := url.Parse((*tracker.Torr)["announce"].(string))
+	ann, err := url.Parse((*tracker.Torr).Data["announce"].(string))
 	if err != nil {
 		fmt.Println("unable to parse announce url")
 		panic(err)
@@ -61,10 +63,40 @@ func main() {
 		fmt.Println("interval:", interval)
 
 	case "http":
-		tracker.GetPeersHTTP()
+		// if the announce scheme is http then send a http tracker request,
+		// this poputate tracker with peers
+		interval, err := tracker.GetPeersHTTP()
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Println("interval:", interval)
 
 	default:
 		fmt.Printf("unsupported announce protocol, %v\n", ann.Scheme)
 	}
+
+	for i, peer := range tracker.Peers {
+		fmt.Printf("Sent to -> %v\n", i)
+		go handlePeerTemp(peer, tracker.Torr)
+	}
+
+	for {
+	}
+
+}
+
+func handlePeerTemp(peer src.Peer, torr *src.Torr) {
+	// err := peer.Handshake(torr)
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	conn, err := net.Dial("tcp", peer.IP.String()+":"+strconv.Itoa(int(peer.Port)))
+	if err != nil {
+		panic(err)
+	}
+
+	peer.KeepAlive(conn)
 
 }
