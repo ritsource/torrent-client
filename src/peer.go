@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
+	"strconv"
 )
 
 // Peer represents a single peer (seeder), it's IP and Port
@@ -13,22 +15,91 @@ type Peer struct {
 	Port uint16
 }
 
-// conn, err := net.Dial("tcp", p.IP.String()+":"+strconv.Itoa(int(p.Port)))
-// if err != nil {
-// 	return err
-// }
+// "BitTorrent protocol"
+
+// HandleMessaging ...
+func (p *Peer) HandleMessaging(torr *Torr) {
+	conn, err := net.Dial("tcp", p.IP.String()+":"+strconv.Itoa(int(p.Port)))
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	defer conn.Close()
+
+	hsbuf, err := HandshakeBuf(torr)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	_, err = conn.Write(hsbuf.Bytes())
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	fmt.Printf("Handshaking with %v\n", conn.RemoteAddr())
+
+	// readMsg(conn)
+
+	for {
+		buf := new(bytes.Buffer)
+
+		// the length data is saved on a (uint8 at the start of message),
+		// that means max size of a message is not going to be more than 255+1 (for handshake 255+49)
+		b := make([]byte, 512)
+		nr, err := conn.Read(b)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			fmt.Println("Error:", err)
+		}
+
+		// fmt.Printf("%s\n", b)
+
+		if nr > 0 {
+			buf.Write(b[:nr])
+			fmt.Printf("Read %v bytes from %v\n", nr, conn.RemoteAddr())
+			handleMsg(conn, *buf)
+		}
+
+	}
+
+	// fmt.Println("Finished!")
+}
+
+func handleMsg(conn net.Conn, buf bytes.Buffer) {
+	// fmt.Printf("%s\n", buf.Bytes())
+	b := buf.Bytes()
+	msglen, err := buf.ReadByte()
+	if err != nil {
+		fmt.Println("couldn't read message length (first byte)", err)
+		return
+	}
+
+	if len(b) == int(msglen)+49 {
+		fmt.Printf("Handshake successful with %v\n", conn.RemoteAddr())
+	}
+}
+
+func (p *Peer) onChoke(conn net.Conn) {
+	fmt.Printf("OnChoke - closing connection with %v\n", conn.RemoteAddr())
+	conn.Close()
+}
 
 // HandshakeBuf builds and returns data to be sent on a handshake
 // request to the peer, what is required message and must be the
 // first message transmitted by the client after the TCP connection
 // is established to each peer client
-func (p Peer) HandshakeBuf(torr *Torr) (*bytes.Buffer, error) {
+func HandshakeBuf(torr *Torr) (*bytes.Buffer, error) {
 	// building buffer to be sent for handshake, for more details
 	// https://wiki.theory.org/index.php/BitTorrentSpecification#Handshake
 	// simply looks like, pstrlen + pstr + reserved + info_hash + peer_id
 	// for version 1.0 of the BitTorrent protocol, pstrlen = 19, and pstr = "BitTorrent protocol".
 	var el = []interface{}{
-		uint8(9),                       // pstrlen -> string length of <pstr>, as a single raw byte
+		uint8(19),                      // pstrlen -> string length of <pstr>, as a single raw byte
 		[]byte("BitTorrent protocol"),  // pstr -> string identifier of the protocol ("BitTorrent protocol")
 		uint64(0),                      // reserved -> eight (8) reserved bytes. All current implementations use all zeroes.
 		infohash((*torr).Data["info"]), // peer_id -> 20-byte string used as a unique ID for the client.

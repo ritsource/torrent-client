@@ -34,6 +34,9 @@ func main() {
 	// tracker
 	tracker := src.NewTracker(&torr)
 
+	// tracker.Torr.ReadPieces()
+	// return
+
 	// parsing announce url of tracker, could be udp or http
 	ann, err := url.Parse((*tracker.Torr).Data["announce"].(string))
 	if err != nil {
@@ -76,15 +79,26 @@ func main() {
 		fmt.Printf("unsupported announce protocol, %v\n", ann.Scheme)
 	}
 
-	for i, peer := range tracker.Peers {
-		fmt.Printf("Sent to -> %v\n", i)
-		go handlePeerTemp(peer, tracker.Torr)
+	// return
+
+	fmt.Printf("%+v\n", tracker.Peers)
+
+	for i := 0; i < len(tracker.Peers); i++ {
+		p := tracker.Peers[i]
+		go p.HandleMessaging(tracker.Torr)
 	}
 
 	for {
 	}
 
+	// for {
+	// }
+
 }
+
+// func handlePeer() {
+
+// }
 
 func handlePeerTemp(peer src.Peer, torr *src.Torr) {
 	// err := peer.Handshake(torr)

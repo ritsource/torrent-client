@@ -102,7 +102,7 @@ func (t *Tracker) GetPeersHTTP() (uint32, error) {
 
 	// TODO: the peer might also be a dictionary have to handle that case too
 
-	fmt.Printf("%+v\n", t.Peers)
+	// fmt.Printf("%+v\n", t.Peers)
 
 	return interval, nil
 }

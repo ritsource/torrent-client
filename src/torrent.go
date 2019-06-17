@@ -1,6 +1,7 @@
 package src
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/marksamman/bencode"
@@ -36,6 +37,31 @@ func (t *Torr) ReadFile(fp string) error {
 	return nil
 }
 
-// func (t *Torr) DecodePieces() {
+// ReadPieces ...
+func (t *Torr) ReadPieces() {
+	if info, ok := (*t).Data["info"].(map[string]interface{}); ok {
+		var piecelength int
+		var comblength int
 
-// }
+		for key, val := range info {
+			// fmt.Println(key, ":")
+			// fmt.Printf("\n%+v\n\n", val)
+			fmt.Println("R:", key)
+
+			if key == "piece length" {
+				piecelength = int(val.(int64))
+				fmt.Println("piecelength:", piecelength)
+			}
+
+			if key == "pieces" {
+				// fmt.Println("original type of info[\"pieces\"]:", reflect.TypeOf(val))
+
+				fmt.Printf("hhhhhhh %v\n", len([]byte(val.(string))))
+				comblength = piecelength * (len([]byte(val.(string))) / 20)
+				fmt.Println("comblength:", comblength)
+			}
+		}
+
+	}
+
+}
