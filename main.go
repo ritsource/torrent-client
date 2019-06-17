@@ -2,10 +2,8 @@ package main
 
 import (
 	"fmt"
-	"net"
 	"net/url"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/ritwik310/torrent-client/src"
@@ -88,6 +86,8 @@ func main() {
 		go p.HandleMessaging(tracker.Torr)
 	}
 
+	// free
+
 	for {
 	}
 
@@ -100,17 +100,6 @@ func main() {
 
 // }
 
-func handlePeerTemp(peer src.Peer, torr *src.Torr) {
-	// err := peer.Handshake(torr)
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	conn, err := net.Dial("tcp", peer.IP.String()+":"+strconv.Itoa(int(peer.Port)))
-	if err != nil {
-		panic(err)
-	}
-
-	peer.KeepAlive(conn)
+func handlePeer(peer *src.Peer) {
 
 }

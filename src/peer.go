@@ -15,35 +15,46 @@ type Peer struct {
 	Port uint16
 }
 
+// PeerProtocolLength ...
+var PeerProtocolLength = 19
+
 // "BitTorrent protocol"
 
 // HandleMessaging ...
+// https://wiki.theory.org/index.php/BitTorrentSpecification#Peer_wire_protocol_.28TCP.29
 func (p *Peer) HandleMessaging(torr *Torr) {
+	// establishing TCP connection with the peer client
 	conn, err := net.Dial("tcp", p.IP.String()+":"+strconv.Itoa(int(p.Port)))
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Printf("couldn't connect to peer %v - %v\n", conn.RemoteAddr(), err)
 		return
 	}
-
 	defer conn.Close()
 
+	// first we want to let the peer know what files you want and also
+	// some unique identifier for our client, this is called a handshake
+	// building data to be sent as handshake message, to find more about it
+	// https://wiki.theory.org/index.php/BitTorrentSpecification#Handshake
 	hsbuf, err := HandshakeBuf(torr)
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Printf("couldn't build the handshake buffer - %v\n", err)
 		return
 	}
 
+	// writing the handshake data to the peer connection
 	_, err = conn.Write(hsbuf.Bytes())
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Printf("couldn't write teh handshake message to peer %v - %v\n:", conn.RemoteAddr(), err)
 		return
 	}
+	fmt.Printf("handshake message has been sent to %v\n", conn.RemoteAddr())
 
-	fmt.Printf("Handshaking with %v\n", conn.RemoteAddr())
-
-	// readMsg(conn)
-
+	// if the peer doesn’t have the files it will close the connection,
+	// else it should send back a similar message as confirmation
+	// so now, reading the first message from peer and expecting
+	// it to be a handshake
 	for {
+		// reading peer response from the connection
 		buf := new(bytes.Buffer)
 
 		// the length data is saved on a (uint8 at the start of message),
@@ -51,13 +62,39 @@ func (p *Peer) HandleMessaging(torr *Torr) {
 		b := make([]byte, 512)
 		nr, err := conn.Read(b)
 		if err != nil {
-			if err == io.EOF {
-				break
+			if err != io.EOF {
+				// break
+				return
 			}
-			fmt.Println("Error:", err)
+			fmt.Printf("handshake error: %v -> %v\n", conn.RemoteAddr(), err)
+		}
+		buf.Write(b[:nr])
+
+		// checking if the message is a handshake, if not handshake then dropping the
+		// connection by "return"-ing
+		if len, err := buf.ReadByte(); err == nil || nr != int(uint8(len)) {
+			if err != nil {
+				fmt.Println("Error:", err)
+			}
+			continue
 		}
 
-		// fmt.Printf("%s\n", b)
+		fmt.Printf("successful handshake with %v\n", conn.RemoteAddr())
+
+		break
+		// return
+	}
+
+	for {
+		buf := new(bytes.Buffer)
+		b := make([]byte, 512)
+		nr, err := conn.Read(b)
+		if err != nil {
+			if err != io.EOF {
+				fmt.Printf("message error: %v -> %v\n", conn.RemoteAddr(), err)
+				break
+			}
+		}
 
 		if nr > 0 {
 			buf.Write(b[:nr])
@@ -71,17 +108,7 @@ func (p *Peer) HandleMessaging(torr *Torr) {
 }
 
 func handleMsg(conn net.Conn, buf bytes.Buffer) {
-	// fmt.Printf("%s\n", buf.Bytes())
-	b := buf.Bytes()
-	msglen, err := buf.ReadByte()
-	if err != nil {
-		fmt.Println("couldn't read message length (first byte)", err)
-		return
-	}
-
-	if len(b) == int(msglen)+49 {
-		fmt.Printf("Handshake successful with %v\n", conn.RemoteAddr())
-	}
+	fmt.Printf("%s\n", buf.Bytes())
 }
 
 func (p *Peer) onChoke(conn net.Conn) {
