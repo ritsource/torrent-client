@@ -79,11 +79,11 @@ func main() {
 
 	// return
 
-	fmt.Printf("%+v\n", tracker.Peers)
+	fmt.Printf("Number of peers: %v\n", len(tracker.Peers))
 
 	for i := 0; i < len(tracker.Peers); i++ {
 		p := tracker.Peers[i]
-		go p.HandleMessaging(tracker.Torr)
+		go p.Download(tracker.Torr)
 	}
 
 	// free

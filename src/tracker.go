@@ -131,6 +131,7 @@ func trackerurl(torr *Torr) (string, error) {
 	pr.Add("compact", "1")                                      // 1
 	pr.Add("event", "started")                                  // started
 	pr.Add("ip", getclientip().String())                        // client's IP, (optional)
+	// pr.Add("numwant", "200")                                    // client's IP, (optional)
 
 	// the tracker announce url
 	trkurl.RawQuery = pr.Encode()

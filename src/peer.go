@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"reflect"
 	"strconv"
+
+	"github.com/sirupsen/logrus"
 )
 
 // Peer represents a single peer (seeder), it's IP and Port
@@ -15,14 +18,17 @@ type Peer struct {
 	Port uint16
 }
 
-// PeerProtocolLength ...
-var PeerProtocolLength = 19
-
 // "BitTorrent protocol"
 
-// HandleMessaging ...
+// Download handles file peer protocol messaging and file download from the
+// corresponding peer. First it creates a connection to the listening peer
+// and writes message twith protocol specification ("BitTorrent protocol")
+// and peer identifier to that, if the peer wants to share data it sends a
+// simillar message back to our client. This is called a handshake. Once the
+// handshake is successful we request files to be downloaded from the peer
+// this is done via verious messages between clients, to learn more visit -
 // https://wiki.theory.org/index.php/BitTorrentSpecification#Peer_wire_protocol_.28TCP.29
-func (p *Peer) HandleMessaging(torr *Torr) {
+func (p *Peer) Download(torr *Torr) {
 	// establishing TCP connection with the peer client
 	conn, err := net.Dial("tcp", p.IP.String()+":"+strconv.Itoa(int(p.Port)))
 	if err != nil {
@@ -31,80 +37,114 @@ func (p *Peer) HandleMessaging(torr *Torr) {
 	}
 	defer conn.Close()
 
-	// first we want to let the peer know what files you want and also
-	// some unique identifier for our client, this is called a handshake
-	// building data to be sent as handshake message, to find more about it
+	// First we want to let the peer know what files you want and also
+	// some unique identifier for our client, aka a Handshake message.
+
+	// Building data to be sent as handshake message, to find more about it
 	// https://wiki.theory.org/index.php/BitTorrentSpecification#Handshake
-	hsbuf, err := HandshakeBuf(torr)
+	hsbuf, err := HandshakeBuf(torr) // buffer to be sent
 	if err != nil {
-		fmt.Printf("couldn't build the handshake buffer - %v\n", err)
+		logrus.Warnf("couldn't build the handshake buffer - %v\n", err)
 		return
 	}
 
-	// writing the handshake data to the peer connection
+	// Writing the handshake data to the peer connection
 	_, err = conn.Write(hsbuf.Bytes())
 	if err != nil {
-		fmt.Printf("couldn't write teh handshake message to peer %v - %v\n:", conn.RemoteAddr(), err)
+		logrus.Warnf("couldn't write teh handshake message to peer %v - %v\n:", conn.RemoteAddr(), err)
 		return
 	}
-	fmt.Printf("handshake message has been sent to %v\n", conn.RemoteAddr())
+	// logrus.Infof("requested handshake to %v\n", conn.RemoteAddr())
 
-	// if the peer doesn’t have the files it will close the connection,
-	// else it should send back a similar message as confirmation
-	// so now, reading the first message from peer and expecting
-	// it to be a handshake
+	// Now, if the peer doesn’t have the files you want (info sent via-
+	// info_hash in handshake request), they will close the connection,
+	// but if they do then they should send back a similar message as
+	// confirmation. We need to wait for the client to write back
+
+	// http://allenkim67.github.io/programming/2016/05/04/how-to-make-your-own-bittorrent-client.html#downloading-from-peers
+	// this article helped me a lot to understand peer to peer messeging
+
+	// Simply, the client might not always send the data in 1 event, it
+	// might send the messages in chunks as multiple events, we need to
+	// take care of making sense of that data, and that's where the
+	// message length data is useful at the start of the message
+
+	// msgbuf will be used to store the message data while reading multiple times
+	msgbuf := new(bytes.Buffer)
+	// the first message is expected to be handshake type and the length defination
+	// for handshake is different, so handshake is true at the start of reading, once
+	// the first message has totally been read we will decleare the handshake as `false`
+	handshake := true
+
+	// Continiously reading from the peer client
 	for {
-		// reading peer response from the connection
-		buf := new(bytes.Buffer)
-
-		// the length data is saved on a (uint8 at the start of message),
-		// that means max size of a message is not going to be more than 255+1 (for handshake 255+49)
-		b := make([]byte, 512)
+		// Reading from the connection
+		b := make([]byte, 1024)
 		nr, err := conn.Read(b)
 		if err != nil {
 			if err != io.EOF {
-				// break
-				return
+				logrus.Warnf("%v\n", err)
+				// logrus.Warnf("read error with %v -> %v\n", conn.RemoteAddr(), err)
 			}
-			fmt.Printf("handshake error: %v -> %v\n", conn.RemoteAddr(), err)
+			continue // if error on read skip teh rest of this iretation
 		}
-		buf.Write(b[:nr])
+		data := b[:nr] // useful part of `b`
 
-		// checking if the message is a handshake, if not handshake then dropping the
-		// connection by "return"-ing
-		if len, err := buf.ReadByte(); err == nil || nr != int(uint8(len)) {
-			if err != nil {
-				fmt.Println("Error:", err)
-			}
-			continue
-		}
-
-		fmt.Printf("successful handshake with %v\n", conn.RemoteAddr())
-
-		break
-		// return
-	}
-
-	for {
-		buf := new(bytes.Buffer)
-		b := make([]byte, 512)
-		nr, err := conn.Read(b)
-		if err != nil {
-			if err != io.EOF {
-				fmt.Printf("message error: %v -> %v\n", conn.RemoteAddr(), err)
-				break
-			}
-		}
-
+		// Extracting message from the read data
 		if nr > 0 {
-			buf.Write(b[:nr])
-			fmt.Printf("Read %v bytes from %v\n", nr, conn.RemoteAddr())
-			handleMsg(conn, *buf)
+			var explen int // expected length, indicates how far a messgae should be read a single message
+
+			// for handshake message (generally the first message) length of message is different, so the
+			// value of `explen` will be extracted differently, (49+len(x)); x = length of protocol-string
+			// to learn more, https://wiki.theory.org/index.php/BitTorrentSpecification#Handshake
+			if handshake {
+				// reading the protocol string ("BitTorrent protocol" for version 1) length
+				bf := new(bytes.Buffer)
+				bf.Write(data)
+				l, err := bf.ReadByte() // l, length specified at the start of
+				if err != nil {
+					logrus.Warnf("error on handshake response - %v\n", err)
+				}
+
+				// explen = (49+len(x)); for handshake message
+				explen = int(uint8(l)) + 49
+			} else {
+				// for all other message type, the first 4 bytes (uint32) defines
+				// the length of message data. So, reading the data `explen` to that
+				explen = int(binary.BigEndian.Uint32(b[:4])) + 4
+			}
+
+			// writing the crrently read data to `msgbuf` buffer (later will be reset once message read is complete)
+			msgbuf.Write(data)
+
+			// fmt.Println("explen -> ", explen)
+
+			// once `msgbuf` lnegth is equal to (or greater than) `explen`,
+			// the message read is complete, doing what to do _________
+			if msgbuf.Len() >= 4 && msgbuf.Len() >= explen {
+				// fmt.Printf("Okay %v %v %s\n", conn.RemoteAddr(), msgbuf.Len(), msgbuf.Bytes())
+
+				if handshake && isHandshake(msgbuf.Bytes()) {
+					logrus.Infof("handshake successful, %v, %v bytes\n", conn.RemoteAddr(), explen)
+				} else {
+					logrus.Infof("message recieved, %v bytes from %v\n", explen, conn.RemoteAddr())
+				}
+
+				msgbuf.Reset()    // reseting the `msgbuf` buffer, message read is complete
+				handshake = false // handshake is settin g to false (can only be true for first message read)
+			}
 		}
 
 	}
 
-	// fmt.Println("Finished!")
+}
+
+func isHandshake(b []byte) bool {
+	if reflect.DeepEqual(b[1:20], []byte("BitTorrent protocol")) {
+		return true
+	}
+
+	return false
 }
 
 func handleMsg(conn net.Conn, buf bytes.Buffer) {
