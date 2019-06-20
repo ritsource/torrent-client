@@ -1,6 +1,7 @@
-package src
+package client
 
 import (
+	"crypto/sha1"
 	"fmt"
 	"os"
 
@@ -43,6 +44,7 @@ func (t *Torr) ReadPieces() {
 		var piecelength int
 		var comblength int
 
+		// TODO: WTF, did I just use a loop! (-_-)
 		for key, val := range info {
 			// fmt.Println(key, ":")
 			// fmt.Printf("\n%+v\n\n", val)
@@ -63,5 +65,40 @@ func (t *Torr) ReadPieces() {
 		}
 
 	}
+}
 
+// Totalbytes calculates the total number of bytes to be
+// downloaded at start, from torr["info"] values
+func (t *Torr) Totalbytes() int {
+	var totalbytes int // total number of bytes
+
+	if info, ok := (*t).Data["info"].(map[string]interface{}); ok {
+		var pl int // pl holds the value of `piece length`, length of each piece in bytes (its equal for all pieces)
+
+		// iretating over info and reading necessary fields
+		for k, v := range info {
+			switch k {
+			case "piece length":
+				pl = int(v.(int64)) // each piece length
+			case "pieces":
+				// `pieces` contains of hashed values for all files, each hash is 20 bytes long,
+				// so deviding the length of `pieces's value` will give us the number of pieces,
+				// and multiplying it with `piece length` will be the total size of all pieces
+				totalbytes = pl * (len([]byte(v.(string))) / 20)
+			}
+		}
+	}
+
+	return totalbytes
+}
+
+// Infohash gets value of info from metainfo map, and
+// returns a 20 byte long sha1 hash of all the info contents
+func (t *Torr) Infohash() []byte {
+	enc := bencode.Encode((t).Data["info"])
+	h := sha1.New()
+	h.Write(enc)
+	hash := h.Sum(nil)
+
+	return hash
 }

@@ -6,7 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/ritwik310/torrent-client/src"
+	"github.com/ritwik310/torrent-client/client"
+	"github.com/ritwik310/torrent-client/tracker"
 )
 
 var transactionID uint32
@@ -23,14 +24,14 @@ func main() {
 	}
 	fn := os.Args[1] // path to the torrent file
 
-	torr := src.Torr{}       // represents torrent metadata
+	torr := client.Torr{}    // represents torrent metadata
 	err := torr.ReadFile(fn) // populating torr by reading values from file
 	if err != nil {
 		panic(err)
 	}
 
 	// tracker
-	tracker := src.NewTracker(&torr)
+	tracker := tracker.NewTracker(&torr)
 
 	// tracker.Torr.ReadPieces()
 	// return
@@ -93,13 +94,5 @@ func main() {
 
 	// for {
 	// }
-
-}
-
-// func handlePeer() {
-
-// }
-
-func handlePeer(peer *src.Peer) {
 
 }
