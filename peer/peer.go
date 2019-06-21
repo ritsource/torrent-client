@@ -156,9 +156,6 @@ func handleMessages(conn net.Conn, buf *bytes.Buffer) {
 
 		payload := make([]byte, len-1)
 		binary.Read(buf, binary.BigEndian, &payload)
-		// fmt.Printf("%v - %v - %s\n", len, id, payload)
-		// if len-1 > 0 {
-		// }
 
 		switch id {
 		case uint8(0):

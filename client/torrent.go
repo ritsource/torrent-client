@@ -8,10 +8,39 @@ import (
 	"github.com/marksamman/bencode"
 )
 
+// NOTFOUND ...
+var NOTFOUND = uint8(0)
+
+// FOUND ...
+var FOUND = uint8(1)
+
+// REQUESTED ...
+var REQUESTED = uint8(2)
+
+// DOWNLOADED ...
+var DOWNLOADED = uint8(3)
+
+// var PIECE = 0
+// var PIECE = 0
+
 // Torr ...
 type Torr struct {
-	Data map[string]interface{}
-	// Pieces
+	Data   map[string]interface{}
+	Pieces []Piece
+}
+
+// Piece ...
+type Piece struct {
+	Status int8
+	Hash   []byte
+	Blocks []Block
+}
+
+// Block ...
+type Block struct {
+	Index  int
+	Begin  int
+	Length int
 }
 
 // Torr represents mets data from the torrent file
@@ -39,32 +68,20 @@ func (t *Torr) ReadFile(fp string) error {
 }
 
 // ReadPieces ...
-func (t *Torr) ReadPieces() {
+func (t *Torr) ReadPieces() error {
 	if info, ok := (*t).Data["info"].(map[string]interface{}); ok {
-		var piecelength int
-		var comblength int
+		pieces := []byte(info["pieces"].(string))
 
-		// TODO: WTF, did I just use a loop! (-_-)
-		for key, val := range info {
-			// fmt.Println(key, ":")
-			// fmt.Printf("\n%+v\n\n", val)
-			fmt.Println("R:", key)
+		for i := 0; i+20 < len(pieces); i += 20 {
+			fmt.Printf("%#x\n", pieces[i:i+20])
 
-			if key == "piece length" {
-				piecelength = int(val.(int64))
-				fmt.Println("piecelength:", piecelength)
-			}
-
-			if key == "pieces" {
-				// fmt.Println("original type of info[\"pieces\"]:", reflect.TypeOf(val))
-
-				fmt.Printf("hhhhhhh %v\n", len([]byte(val.(string))))
-				comblength = piecelength * (len([]byte(val.(string))) / 20)
-				fmt.Println("comblength:", comblength)
-			}
+			t.Pieces = append(t.Pieces, Piece{Status: 0, Hash: pieces[i : i+20]})
 		}
 
+		return nil
 	}
+
+	return fmt.Errorf("unable to read pieces from torrent")
 }
 
 // Totalbytes calculates the total number of bytes to be

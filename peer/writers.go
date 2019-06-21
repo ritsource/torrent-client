@@ -50,7 +50,7 @@ func HandshakeBuf(torr *client.Torr) (*bytes.Buffer, error) {
 // message ID -> defines the type is the message, an uint8
 // payload -> is the payload requested if there's any (usually downloadable data)
 
-// WriteKeepAlive sends a keep-alive message to the peer-client it
+// writeKeepAlive sends a keep-alive message to the peer-client it
 // must be sent to maintain the connection alive if no command
 // have been sent for a given amount of time (generally two minutes)
 func writeKeepAlive(c net.Conn) error {
@@ -59,7 +59,7 @@ func writeKeepAlive(c net.Conn) error {
 	return writetoconn(c, make([]byte, 4))
 }
 
-// WriteChoke message sender
+// writeChoke message sender
 func writeChoke(c net.Conn) error {
 	// The choke message has an id of 0 and has no payload
 	buf := new(bytes.Buffer)
@@ -69,7 +69,7 @@ func writeChoke(c net.Conn) error {
 	return writetoconn(c, buf.Bytes())
 }
 
-// WriteUnChoke message sender
+// writeUnChoke message sender
 func writeUnChoke(c net.Conn) error {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, uint32(1))
@@ -78,7 +78,7 @@ func writeUnChoke(c net.Conn) error {
 	return writetoconn(c, buf.Bytes())
 }
 
-// WriteInterested message sender
+// writeInterested message sender
 func writeInterested(c net.Conn) error {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, uint32(1))
@@ -87,7 +87,7 @@ func writeInterested(c net.Conn) error {
 	return writetoconn(c, buf.Bytes())
 }
 
-// WriteNotInterested message sender
+// writeNotInterested message sender
 func writeNotInterested(c net.Conn) error {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, uint32(1))
@@ -96,7 +96,7 @@ func writeNotInterested(c net.Conn) error {
 	return writetoconn(c, buf.Bytes())
 }
 
-// WriteHave message sender
+// writeHave message sender
 func writeHave(c net.Conn, pi uint32) error {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, uint32(5))
@@ -105,6 +105,9 @@ func writeHave(c net.Conn, pi uint32) error {
 
 	return writetoconn(c, buf.Bytes())
 }
+
+// func writeRequest(c net.Conn) error {
+// }
 
 // writetoconn writes data to a connection and returns
 // error if there's an error

@@ -30,6 +30,11 @@ func main() {
 		panic(err)
 	}
 
+	err = torr.ReadPieces()
+	if err != nil {
+		panic(err)
+	}
+
 	// tracker
 	tracker := tracker.NewTracker(&torr)
 
