@@ -84,6 +84,14 @@ func (t *Torr) ReadPieces() error {
 	return fmt.Errorf("unable to read pieces from torrent")
 }
 
+// Blockize ..
+func (t *Torr) Blockize() error {
+	for _, piece := range t.Pieces {
+		fmt.Printf("%+v\n", piece)
+	}
+	return nil
+}
+
 // Totalbytes calculates the total number of bytes to be
 // downloaded at start, from torr["info"] values
 func (t *Torr) Totalbytes() int {

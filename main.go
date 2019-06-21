@@ -35,6 +35,8 @@ func main() {
 		panic(err)
 	}
 
+	torr.Blockize()
+
 	// tracker
 	tracker := tracker.NewTracker(&torr)
 
