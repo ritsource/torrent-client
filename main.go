@@ -2,69 +2,43 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"os"
-	"time"
 
-	"github.com/ritwik310/torrent-client/client"
-	"github.com/ritwik310/torrent-client/tracker"
+	"github.com/sirupsen/logrus"
 )
-
-var transactionID uint32
-
-func init() {
-	transactionID = uint32(time.Now().Unix()) // WARNING: not sure if a good idea
-}
 
 func main() {
 	// reading command line arguements for torrent file path
 	if len(os.Args) < 2 {
-		fmt.Println("no torrent file provided")
+		logrus.Errorf("no torrent file provided")
 		return
 	}
-	fn := os.Args[1] // path to the torrent file
+	fn := os.Args[1]
 
-	torr := client.Torr{}    // represents torrent metadata
-	err := torr.ReadFile(fn) // populating torr by reading values from file
+	// // reading the torrent file
+	torr, err := NewTorrent(fn)
 	if err != nil {
-		panic(err)
+		logrus.Panicf("%v\n", err)
 	}
 
-	err = torr.ReadPieces()
-	if err != nil {
-		panic(err)
-	}
-
-	torr.Blockize()
-
-	// tracker
-	tracker := tracker.NewTracker(&torr)
-
-	// tracker.Torr.ReadPieces()
-	// return
-
-	// parsing announce url of tracker, could be udp or http
-	ann, err := url.Parse((*tracker.Torr).Data["announce"].(string))
-	if err != nil {
-		fmt.Println("unable to parse announce url")
-		panic(err)
-	}
+	// new tracker
+	tracker := NewTracker(torr)
 
 	// check protocol
-	switch ann.Scheme {
+	switch torr.AnnounceURL.Scheme {
 	case "udp":
 		// sending connection request to UDP server (the announce host) and reading responses
-		tID, connID, err := tracker.ConnUDP(ann.Host, transactionID)
+		tID, connID, err := tracker.ConnUDP(torr.AnnounceURL.Host, TransactionID)
 		if err != nil {
 			panic(err)
 		}
-		if tID != transactionID {
-			panic(fmt.Sprintf("transaction_id is the request and response did not match %v != %v \n", transactionID, tID))
+		if tID != TransactionID {
+			panic(fmt.Sprintf("transaction_id is the request and response did not match %v != %v \n", TransactionID, tID))
 		}
 
 		// once connection request is successfule, sending announce request
 		// this will mainly get us a list of seeders for that torrent files
-		interval, err := tracker.GetPeersUDP(ann.Host, tID, connID)
+		interval, err := tracker.GetPeersUDP(torr.AnnounceURL.Host, tID, connID)
 		if err != nil {
 			panic(err)
 		}
@@ -82,7 +56,7 @@ func main() {
 		fmt.Println("interval:", interval)
 
 	default:
-		fmt.Printf("unsupported announce protocol, %v\n", ann.Scheme)
+		fmt.Printf("unsupported announce protocol, %v\n", torr.AnnounceURL.Scheme)
 	}
 
 	// return
@@ -91,15 +65,9 @@ func main() {
 
 	for i := 0; i < len(tracker.Peers); i++ {
 		p := tracker.Peers[i]
-		go p.Download(tracker.Torr)
+		go p.Download(tracker.Torrent)
 	}
-
-	// free
 
 	for {
 	}
-
-	// for {
-	// }
-
 }
