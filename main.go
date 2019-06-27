@@ -65,7 +65,7 @@ func main() {
 
 	for i := 0; i < len(tracker.Peers); i++ {
 		p := tracker.Peers[i]
-		go p.Download(tracker.Torrent)
+		go p.GetPieces(tracker.Torrent)
 	}
 
 	for {

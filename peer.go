@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"reflect"
 	"strconv"
@@ -15,29 +16,35 @@ import (
 var (
 	// PeerProtocolV1 - Peer protocol name, for bitorrent protocol version 1
 	PeerProtocolV1 = []byte("BitTorrent protocol")
+	BlockLength    = math.Pow(2, 14)
 )
 
 // Peer .
 type Peer struct {
-	IP   net.IP
-	Port uint16
-	Conn net.Conn
+	IP     net.IP
+	Port   uint16
+	Conn   net.Conn
+	Pieces map[uint32]int
 }
 
-// Download handles the peer protocol messeging between with a peer. First,
+// GetPieces handles the peer protocol messeging between with a peer. First,
 // it creates a tcp connection with the peer and sends a handshake request.
 // If the peer wants to share data, it responds with a similar message back
 // to our client. This is called a handshake. Once the handshake is successful
 // we request pieces from via peer to peer messaging, to learn more visit -
 // https://wiki.theory.org/index.php/BitTorrentSpecification#Peer_wire_protocol_.28TCP.29
-func (p *Peer) Download(torr *Torrent) {
+func (p *Peer) GetPieces(torr *Torrent) {
+
+	p.Pieces = make(map[uint32]int)
+
+	var err error
 	// establishing TCP connection with the peer client
-	conn, err := net.Dial("tcp", p.IP.String()+":"+strconv.Itoa(int(p.Port)))
+	p.Conn, err = net.Dial("tcp", p.IP.String()+":"+strconv.Itoa(int(p.Port)))
 	if err != nil {
 		logrus.Warnf("%v\n", err)
 		return
 	}
-	defer conn.Close()
+	defer p.Conn.Close()
 
 	// First we want to let the peer know what files you want and also
 	// some unique identifier for our client, aka a Handshake message.
@@ -50,7 +57,7 @@ func (p *Peer) Download(torr *Torrent) {
 	}
 
 	// Writing the handshake data to the peer connection
-	_, err = conn.Write(hsbuf.Bytes())
+	_, err = p.Conn.Write(hsbuf.Bytes())
 	if err != nil {
 		logrus.Warnf("couldn't write handshake request, %v\n", err)
 		return
@@ -80,7 +87,7 @@ func (p *Peer) Download(torr *Torrent) {
 	for {
 		// Reading from the connection
 		b := make([]byte, 1024)
-		nr, err := conn.Read(b)
+		nr, err := p.Conn.Read(b)
 		if err != nil {
 			if err != io.EOF {
 				logrus.Warnf("%v\n", err)
@@ -125,10 +132,10 @@ func (p *Peer) Download(torr *Torrent) {
 				// fmt.Printf("Okay %v %v %s\n", conn.RemoteAddr(), msgbuf.Len(), msgbuf.Bytes())
 
 				if handshake && IsHS(msgbuf.Bytes()) {
-					logrus.Infof("handshake successful, %v bytes from %v\n", explen, conn.RemoteAddr())
+					logrus.Infof("handshake successful, %v bytes from %v\n", explen, p.Conn.RemoteAddr())
 				} else {
-					logrus.Infof("message recieved, %v bytes from %v\n", explen, conn.RemoteAddr())
-					handleMessages(conn, msgbuf, torr)
+					logrus.Infof("message recieved, %v bytes from %v\n", explen, p.Conn.RemoteAddr())
+					p.handleMessages(msgbuf, torr)
 				}
 
 				msgbuf.Reset()    // reseting the `msgbuf` buffer, message read is complete
@@ -162,9 +169,9 @@ func IsHS(b []byte) bool {
 	return reflect.DeepEqual(b[1:20], PeerProtocolV1)
 }
 
-func handleMessages(conn net.Conn, buf *bytes.Buffer, torr *Torrent) {
+func (p *Peer) handleMessages(buf *bytes.Buffer, torr *Torrent) {
 	if IsHS(buf.Bytes()) {
-		writeInterested(conn)
+		writeInterested(p.Conn)
 	} else {
 		var length uint32
 		var id uint8
@@ -178,101 +185,63 @@ func handleMessages(conn net.Conn, buf *bytes.Buffer, torr *Torrent) {
 		switch id {
 		case uint8(0):
 			logrus.Info("choke")
-			err := handleChoke(conn)
-			if err != nil {
-				logrus.Errorf("%v\n", err)
-			}
 		case uint8(1):
 			logrus.Info("unchoke")
-			err := handleUnchoke(conn)
-			if err != nil {
-				logrus.Errorf("%v\n", err)
-			}
 		case uint8(2):
 			logrus.Info("interested")
-			err := handleInterested(conn)
-			if err != nil {
-				logrus.Errorf("%v\n", err)
-			}
 		case uint8(3):
 			logrus.Info("not interested")
-			err := handleNotInterested(conn)
-			if err != nil {
-				logrus.Errorf("%v\n", err)
-			}
 		case uint8(4):
 			logrus.Info("have")
-			err := handleHave(conn)
-			if err != nil {
-				logrus.Errorf("%v\n", err)
-			}
+
+			i := binary.BigEndian.Uint32(payload)
+			p.Pieces[i] = 1
+
 		case uint8(5):
 			logrus.Info("bitfield")
-			// fmt.Printf("%s\n", payload)
 
-			// r := make([]int, len(bs)*8)
-			for i, b := range payload {
-				for j := 0; j < 8; j++ {
-					if torr.Pieces[i*8+j].Status == PieceNotFound && int(b>>uint(7-j)&0x01) == 1 {
-						fmt.Printf("torr.Pieces[i].Status ------------> %v\n", conn.RemoteAddr())
-					}
-				}
+			bits := toBits(payload)
+
+			if len(torr.Pieces) != len(bits) {
+				logrus.Errorf("piece length mismatch in bitfield message")
+				return
 			}
 
-			// for i := 0; i+8 < len(payload); i += 8 {
-			// 	p := payload[i : i+8]
-			// 	fmt.Println(binary.BigEndian.Uint64(p))
-			// 	// if binary.BigEndian.Uint64(p) == 0 {
-			// 	// 	fmt.Printf("torr.Pieces[i].Status ------------> %v\n", conn.RemoteAddr())
-			// 	// } else {
-			// 	// 	fmt.Printf("ERROOOOOO\n")
-			// 	// }
-			// }
+			for i, bit := range bits {
+				p.Pieces[uint32(i)] = bit
+			}
 
-			// for _, p := range payload {
-			// 	if int(p) == 0 {
-			// 		fmt.Printf("torr.Pieces[i].Status ------------> %v\n", conn.RemoteAddr())
-			// 	} else {
-			// 		fmt.Printf("ERROOOOOO\n")
-			// 	}
-			// 	// if p == byte(1) || torr.Pieces[i].Status == PieceNotFound {
-			// 	// 	// torr.Pieces[i].Status = PieceFound
-			// 	// }
-			// }
+			fmt.Println("Pice length ->", len(torr.Pieces))
+			fmt.Println("bits length -> ", len(p.Pieces))
 
 			return
 
-			err := handleBitfield(conn)
-			if err != nil {
-				logrus.Errorf("%v\n", err)
+			for i, bit := range p.Pieces {
+				if bit == 1 && torr.Pieces[i].Status == PieceNotFound {
+					torr.Pieces[i].Status = PieceFound
+				}
 			}
 		case uint8(6):
 			logrus.Info("request")
-			err := handleRequest(conn)
-			if err != nil {
-				logrus.Errorf("%v\n", err)
-			}
 		case uint8(7):
 			logrus.Info("piece")
-			err := handlePiece(conn)
-			if err != nil {
-				logrus.Errorf("%v\n", err)
-			}
 		case uint8(8):
 			logrus.Info("cancel")
-			err := handlePort(conn)
-			if err != nil {
-				logrus.Errorf("%v\n", err)
-			}
 		case uint8(9):
 			logrus.Info("port")
-			err := handleChoke(conn)
-			if err != nil {
-				logrus.Errorf("%v\n", err)
-			}
 		}
 	}
 	// fmt.Printf("%s\n", buf.Bytes())
+}
+
+func toBits(bs []byte) []int {
+	r := make([]int, len(bs)*8)
+	for i, b := range bs {
+		for j := 0; j < 8; j++ {
+			r[i*8+j] = int(b >> uint(7-j) & 0x01)
+		}
+	}
+	return r
 }
 
 // handleChoke ...
@@ -391,7 +360,9 @@ func writeHave(c net.Conn, pi uint32) error {
 	return writetoconn(c, buf.Bytes())
 }
 
-// func writeRequest(c net.Conn) error {
+// writeRequest .
+// func writeRequest(c net.Conn, index, ) error {
+
 // }
 
 // writetoconn writes data to a connection and returns

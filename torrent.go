@@ -49,11 +49,14 @@ func NewTorrent(fn string) (*Torrent, error) {
 		pl := int(info["piece length"].(int64))   // length of each piece (the file to be downloaded) in bytes, it's equal for every piece
 
 		// reading pieces and appending each hash to t.Pieces property
-		for i := 0; i+20 < len(pieces); i += 20 {
+		for i := 0; i+20 <= len(pieces); i += 20 {
 			t.Pieces = append(t.Pieces, Piece{Status: 0, Hash: pieces[i : i+20]})
 		}
 
+		t.PieceLen = pl
 		t.Size = pl * len(t.Pieces) // total size of downloadable file
+
+		// fmt.Println("--__--__--__-->", len(pieces)/20, len(t.Pieces))
 	} else {
 		return nil, fmt.Errorf("torrent file read: unable to read torrent info")
 	}
@@ -67,6 +70,7 @@ type Torrent struct {
 	Data        map[string]interface{} // bencode decoded metainfo
 	Pieces      []Piece                // all the pieces inf the info property
 	Size        int                    // total size of teh file to be downloaded in bytes
+	PieceLen    int                    // piece length property (length of each piece in bytes)
 	InfoHash    []byte                 // infohash of the torrent file
 	AnnounceURL *url.URL               // announce URL
 }
@@ -85,5 +89,6 @@ const (
 type Piece struct {
 	Status uint8
 	Hash   []byte
+	Length int
 	// Peers - peers who have that (probably)
 }
