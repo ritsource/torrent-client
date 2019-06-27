@@ -1,13 +1,17 @@
-package main
+package torrent
 
 import (
 	"crypto/sha1"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 
 	"github.com/marksamman/bencode"
 )
+
+// BlockLength ...
+var BlockLength = int(math.Pow(2, 14))
 
 // NewTorrent gets a file path and constructs a Torrent struct from that
 func NewTorrent(fn string) (*Torrent, error) {
@@ -50,7 +54,7 @@ func NewTorrent(fn string) (*Torrent, error) {
 
 		// reading pieces and appending each hash to t.Pieces property
 		for i := 0; i+20 <= len(pieces); i += 20 {
-			t.Pieces = append(t.Pieces, &Piece{Status: 0, Hash: pieces[i : i+20]})
+			t.Pieces = append(t.Pieces, &Piece{Status: 0, Hash: pieces[i : i+20], Index: i / 20})
 		}
 
 		t.PieceLen = pl
@@ -88,6 +92,7 @@ const (
 // from peers, idealy different pieces needs to be downloaded from different
 // peers to make the download efficient
 type Piece struct {
+	Index  int
 	Status uint8
 	Hash   []byte
 	Length int

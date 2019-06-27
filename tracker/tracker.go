@@ -1,4 +1,4 @@
-package main
+package tracker
 
 import (
 	"bufio"
@@ -11,21 +11,24 @@ import (
 	"strconv"
 
 	"github.com/marksamman/bencode"
+	"github.com/ritwik310/torrent-client/info"
+	"github.com/ritwik310/torrent-client/peer"
+	"github.com/ritwik310/torrent-client/torrent"
 )
 
 // NewTracker function returns a new Tracker struct
-func NewTracker(torr *Torrent) Tracker {
+func NewTracker(torr *torrent.Torrent) Tracker {
 	return Tracker{
 		Torrent: torr,
-		Peers:   []*Peer{},
+		Peers:   []*peer.Peer{},
 	}
 }
 
 // Tracker struct handles announce and tracker related methods
 type Tracker struct {
-	Torrent      *Torrent
-	Peers        []*Peer
-	SharingPeers []*Peer
+	Torrent      *torrent.Torrent
+	Peers        []*peer.Peer
+	SharingPeers []*peer.Peer
 }
 
 // GetPeersHTTP sends tracker request to the announce address
@@ -91,7 +94,7 @@ func (t *Tracker) GetPeersHTTP() (uint32, error) {
 				break
 			}
 			// reading peer info and appending it the the tracker struct,
-			peer := Peer{IP: net.IP(peers[i : i+4]), Port: binary.BigEndian.Uint16(peers[i+4 : i+6])}
+			peer := peer.Peer{IP: net.IP(peers[i : i+4]), Port: binary.BigEndian.Uint16(peers[i+4 : i+6])}
 			t.Peers = append(t.Peers, &peer) // appending peer to tracker.Peers
 			// skip the next 6
 			i += 6
@@ -106,22 +109,22 @@ func (t *Tracker) GetPeersHTTP() (uint32, error) {
 }
 
 // trackerurl returns announce string with all the required param values for tracker request
-func trackerurl(torr *Torrent) (string, error) {
+func trackerurl(torr *torrent.Torrent) (string, error) {
 	// reading the url from torr data, torr["announce"]
 	trkurl := torr.AnnounceURL
 
 	// appending all the required param values for tracker request
 	// to learn more about it https://wiki.theory.org/index.php/BitTorrentSpecification#Tracker_Request_Parameters
 	pr := url.Values{}
-	pr.Add("info_hash", string(torr.InfoHash))    // urlencoded 20-byte SHA1 hash of the info value in torr
-	pr.Add("peer_id", string(ClientID))           // urlencoded 20-byte string used as a unique ID for the client, generated at startup
-	pr.Add("port", strconv.Itoa(int(ClientPort))) // the port number that the client is listening on
-	pr.Add("uploaded", "0")                       // total amount uploaded (0 at start)
-	pr.Add("downloaded", "0")                     // total downloaded (0 at start)
-	pr.Add("left", strconv.Itoa(torr.Size))       // left to download (full at start)
-	pr.Add("compact", "1")                        // 1
-	pr.Add("event", "started")                    // started
-	pr.Add("ip", ClientIP.String())               // client's IP, (optional)
+	pr.Add("info_hash", string(torr.InfoHash))         // urlencoded 20-byte SHA1 hash of the info value in torr
+	pr.Add("peer_id", string(info.ClientID))           // urlencoded 20-byte string used as a unique ID for the client, generated at startup
+	pr.Add("port", strconv.Itoa(int(info.ClientPort))) // the port number that the client is listening on
+	pr.Add("uploaded", "0")                            // total amount uploaded (0 at start)
+	pr.Add("downloaded", "0")                          // total downloaded (0 at start)
+	pr.Add("left", strconv.Itoa(torr.Size))            // left to download (full at start)
+	pr.Add("compact", "1")                             // 1
+	pr.Add("event", "started")                         // started
+	pr.Add("ip", info.ClientIP.String())               // client's IP, (optional)
 	// pr.Add("numwant", "200")                                    // client's IP, (optional)
 
 	// the tracker announce url
@@ -260,7 +263,7 @@ func (t *Tracker) GetPeersUDP(addr string, tid uint32, cid uint64) (uint32, erro
 			break
 		}
 		// reading peer info and appending it the the tracker struct,
-		peer := Peer{IP: net.IP(resp[i : i+4]), Port: binary.BigEndian.Uint16(resp[i+4 : i+6])}
+		peer := peer.Peer{IP: net.IP(resp[i : i+4]), Port: binary.BigEndian.Uint16(resp[i+4 : i+6])}
 		t.Peers = append(t.Peers, &peer)
 		i += 6
 	}
@@ -272,25 +275,25 @@ func (t *Tracker) GetPeersUDP(addr string, tid uint32, cid uint64) (uint32, erro
 
 // announceDataUDP takes a *Torr and returns a formatted buffer
 // that contains required elements for UDP announce requests
-func announceDataUDP(torr *Torrent, tid uint32, cid uint64, numseed int) (*bytes.Buffer, error) {
+func announceDataUDP(torr *torrent.Torrent, tid uint32, cid uint64, numseed int) (*bytes.Buffer, error) {
 	// constructing buffer for required for request packet,
 	// for more details visit http://www.bittorrent.org/beps/bep_0015.html
 
 	// to temporarily hold the data in an array
 	var el = []interface{}{
-		uint64(cid),                       // 0-8 -> connection_id -> connection_id recieved from connection response
-		uint32(1),                         // 8-12 -> action -> 1, represents announce request
-		uint32(tid),                       // 12-16 -> transaction_id -> transaction_id from conn-response
-		torr.InfoHash,                     // 16-36 -> info_hash -> sha1 hash of encoded (bencode) info_hash property of torr metadata
-		ClientID,                          // 36-56 -> peer_id -> used as a unique ID for the client, generated by the client at startup
-		uint64(0),                         // 56-64 -> downloaded -> how much has been downloaded (0 at start)
-		uint64(torr.Size),                 // 64-72 -> left -> how many bytes are yet to be downloaded
-		uint64(0),                         // 72-80 -> uploaded -> how much has been uploaded
-		uint32(2),                         // 80-84 -> event -> 2 (0: none; 1: completed; 2: started; 3: stopped)
-		binary.BigEndian.Uint32(ClientIP), // 84-88 -> IP -> client's ip address
-		uint32(0),                         // 88-92 -> key -> for identification (optional)
-		uint32(numseed),                   // 92-96 -> num_want -> -1 is default (number of peers that the client would like to receive)
-		ClientPort,                        // 96-98 -> port -> port that the client is listening on (typically 6881-6889
+		uint64(cid),                            // 0-8 -> connection_id -> connection_id recieved from connection response
+		uint32(1),                              // 8-12 -> action -> 1, represents announce request
+		uint32(tid),                            // 12-16 -> transaction_id -> transaction_id from conn-response
+		torr.InfoHash,                          // 16-36 -> info_hash -> sha1 hash of encoded (bencode) info_hash property of torr metadata
+		info.ClientID,                          // 36-56 -> peer_id -> used as a unique ID for the client, generated by the client at startup
+		uint64(0),                              // 56-64 -> downloaded -> how much has been downloaded (0 at start)
+		uint64(torr.Size),                      // 64-72 -> left -> how many bytes are yet to be downloaded
+		uint64(0),                              // 72-80 -> uploaded -> how much has been uploaded
+		uint32(2),                              // 80-84 -> event -> 2 (0: none; 1: completed; 2: started; 3: stopped)
+		binary.BigEndian.Uint32(info.ClientIP), // 84-88 -> IP -> client's ip address
+		uint32(0),                              // 88-92 -> key -> for identification (optional)
+		uint32(numseed),                        // 92-96 -> num_want -> -1 is default (number of peers that the client would like to receive)
+		info.ClientPort,                        // 96-98 -> port -> port that the client is listening on (typically 6881-6889
 	}
 
 	// writing the data to a buffer, to be send in the request
