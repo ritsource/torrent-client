@@ -17,14 +17,15 @@ import (
 func NewTracker(torr *Torrent) Tracker {
 	return Tracker{
 		Torrent: torr,
-		Peers:   []Peer{},
+		Peers:   []*Peer{},
 	}
 }
 
 // Tracker struct handles announce and tracker related methods
 type Tracker struct {
-	Torrent *Torrent
-	Peers   []Peer
+	Torrent      *Torrent
+	Peers        []*Peer
+	SharingPeers []*Peer
 }
 
 // GetPeersHTTP sends tracker request to the announce address
@@ -91,7 +92,7 @@ func (t *Tracker) GetPeersHTTP() (uint32, error) {
 			}
 			// reading peer info and appending it the the tracker struct,
 			peer := Peer{IP: net.IP(peers[i : i+4]), Port: binary.BigEndian.Uint16(peers[i+4 : i+6])}
-			t.Peers = append(t.Peers, peer) // appending peer to tracker.Peers
+			t.Peers = append(t.Peers, &peer) // appending peer to tracker.Peers
 			// skip the next 6
 			i += 6
 		}
@@ -260,7 +261,7 @@ func (t *Tracker) GetPeersUDP(addr string, tid uint32, cid uint64) (uint32, erro
 		}
 		// reading peer info and appending it the the tracker struct,
 		peer := Peer{IP: net.IP(resp[i : i+4]), Port: binary.BigEndian.Uint16(resp[i+4 : i+6])}
-		t.Peers = append(t.Peers, peer)
+		t.Peers = append(t.Peers, &peer)
 		i += 6
 	}
 

@@ -9,6 +9,7 @@ import (
 	"net"
 	"reflect"
 	"strconv"
+	"sync"
 
 	"github.com/sirupsen/logrus"
 )
@@ -21,10 +22,11 @@ var (
 
 // Peer .
 type Peer struct {
-	IP     net.IP
-	Port   uint16
-	Conn   net.Conn
-	Pieces map[uint32]int
+	IP      net.IP
+	Port    uint16
+	Conn    net.Conn
+	Sharing bool
+	Pieces  []int
 }
 
 // GetPieces handles the peer protocol messeging between with a peer. First,
@@ -33,10 +35,7 @@ type Peer struct {
 // to our client. This is called a handshake. Once the handshake is successful
 // we request pieces from via peer to peer messaging, to learn more visit -
 // https://wiki.theory.org/index.php/BitTorrentSpecification#Peer_wire_protocol_.28TCP.29
-func (p *Peer) GetPieces(torr *Torrent) {
-
-	p.Pieces = make(map[uint32]int)
-
+func (p *Peer) GetPieces(torr *Torrent, ch chan *Peer) {
 	var err error
 	// establishing TCP connection with the peer client
 	p.Conn, err = net.Dial("tcp", p.IP.String()+":"+strconv.Itoa(int(p.Port)))
@@ -135,7 +134,7 @@ func (p *Peer) GetPieces(torr *Torrent) {
 					logrus.Infof("handshake successful, %v bytes from %v\n", explen, p.Conn.RemoteAddr())
 				} else {
 					logrus.Infof("message recieved, %v bytes from %v\n", explen, p.Conn.RemoteAddr())
-					p.handleMessages(msgbuf, torr)
+					p.handleMessages(msgbuf, torr, ch)
 				}
 
 				msgbuf.Reset()    // reseting the `msgbuf` buffer, message read is complete
@@ -169,7 +168,16 @@ func IsHS(b []byte) bool {
 	return reflect.DeepEqual(b[1:20], PeerProtocolV1)
 }
 
-func (p *Peer) handleMessages(buf *bytes.Buffer, torr *Torrent) {
+// Download .
+func (p *Peer) Download(piece *Piece, wg *sync.WaitGroup) {
+	fmt.Println("downloading.......")
+	if p.Sharing {
+		piece.Status = PieceFound
+	}
+	wg.Done()
+}
+
+func (p *Peer) handleMessages(buf *bytes.Buffer, torr *Torrent, ch chan *Peer) {
 	if IsHS(buf.Bytes()) {
 		writeInterested(p.Conn)
 	} else {
@@ -187,18 +195,22 @@ func (p *Peer) handleMessages(buf *bytes.Buffer, torr *Torrent) {
 			logrus.Info("choke")
 		case uint8(1):
 			logrus.Info("unchoke")
+			p.Sharing = true
+			// writeInterested(p.Conn)
 		case uint8(2):
 			logrus.Info("interested")
 		case uint8(3):
 			logrus.Info("not interested")
 		case uint8(4):
 			logrus.Info("have")
+			// p.Sharing = true
 
-			i := binary.BigEndian.Uint32(payload)
-			p.Pieces[i] = 1
+			// i := binary.BigEndian.Uint32(payload)
+			// p.Pieces[i] = 1
 
 		case uint8(5):
 			logrus.Info("bitfield")
+			p.Sharing = true
 
 			bits := toBits(payload)
 
@@ -207,20 +219,20 @@ func (p *Peer) handleMessages(buf *bytes.Buffer, torr *Torrent) {
 				return
 			}
 
-			for i, bit := range bits {
-				p.Pieces[uint32(i)] = bit
-			}
+			p.Pieces = bits
 
 			fmt.Println("Pice length ->", len(torr.Pieces))
 			fmt.Println("bits length -> ", len(p.Pieces))
 
+			ch <- p
+
 			return
 
-			for i, bit := range p.Pieces {
-				if bit == 1 && torr.Pieces[i].Status == PieceNotFound {
-					torr.Pieces[i].Status = PieceFound
-				}
-			}
+			// for i, bit := range p.Pieces {
+			// 	if bit == 1 && torr.Pieces[i].Status == PieceNotFound {
+			// 		torr.Pieces[i].Status = PieceFound
+			// 	}
+			// }
 		case uint8(6):
 			logrus.Info("request")
 		case uint8(7):

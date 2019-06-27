@@ -50,7 +50,7 @@ func NewTorrent(fn string) (*Torrent, error) {
 
 		// reading pieces and appending each hash to t.Pieces property
 		for i := 0; i+20 <= len(pieces); i += 20 {
-			t.Pieces = append(t.Pieces, Piece{Status: 0, Hash: pieces[i : i+20]})
+			t.Pieces = append(t.Pieces, &Piece{Status: 0, Hash: pieces[i : i+20]})
 		}
 
 		t.PieceLen = pl
@@ -68,7 +68,7 @@ func NewTorrent(fn string) (*Torrent, error) {
 // of a selected torrent file for downloading
 type Torrent struct {
 	Data        map[string]interface{} // bencode decoded metainfo
-	Pieces      []Piece                // all the pieces inf the info property
+	Pieces      []*Piece               // all the pieces inf the info property
 	Size        int                    // total size of teh file to be downloaded in bytes
 	PieceLen    int                    // piece length property (length of each piece in bytes)
 	InfoHash    []byte                 // infohash of the torrent file
@@ -81,6 +81,7 @@ const (
 	PieceFound      uint8 = 1 // when atleast 1 have/bitfield request contains teh piece-index
 	PieceRequested  uint8 = 2 // when piece whave been requested to a peer
 	PieceDownloaded uint8 = 3 // when piece download has successfully been completed
+	PieceFailed     uint8 = 4 // when piece download has not been successful (failed once)
 )
 
 // Piece represents a chunk of the actual file that needed to be downloaded
