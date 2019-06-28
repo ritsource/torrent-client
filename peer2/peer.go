@@ -1,4 +1,4 @@
-package peer
+package peer2
 
 import (
 	"bytes"
@@ -30,9 +30,7 @@ type Peer struct {
 // Close .
 func (p *Peer) Close() {
 	p.Messaging = false
-	if p.Conn != nil {
-		p.Conn.Close()
-	}
+	p.Conn.Close()
 }
 
 // Stop .
@@ -72,8 +70,7 @@ func (p *Peer) Start() {
 	// info_hash in handshake request), they will close the connection,
 	// but if they do then they should send back a similar message as
 	// confirmation. We need to wait for the client to write back
-	p.Messaging = true
-	p.ReadMessages()
+	go p.ReadMessages()
 }
 
 // handshakeBuf builds and returns a handshake message buffer
@@ -157,7 +154,6 @@ func (p *Peer) ReadMessages() {
 				logrus.Infof("handshake successful with %v\n", p.Conn.RemoteAddr())
 			} else {
 				logrus.Infof("%v bytes message from %v\n", explen, p.Conn.RemoteAddr())
-				p.HandleMessages(msgbuf)
 			}
 
 			msgbuf.Reset()    // reseting the `msgbuf` buffer, message read is complete
@@ -187,10 +183,8 @@ func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 		switch id {
 		case uint8(0):
 			logrus.Infof("choke\n")
-			p.Close()
 		case uint8(1):
 			logrus.Infof("unchoke\n")
-			p.UnChoked = true
 		case uint8(2):
 			logrus.Infof("interested\n")
 		case uint8(3):
@@ -198,8 +192,7 @@ func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 		case uint8(4):
 			logrus.Infof("have\n")
 		case uint8(5):
-			logrus.Infof("-> bitfield\n")
-			p.handleBitfield(payload)
+			logrus.Infof("bitfield\n")
 		case uint8(6):
 			logrus.Infof("request\n")
 		case uint8(7):

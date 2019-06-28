@@ -3,10 +3,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
+	"time"
 
 	"github.com/ritwik310/torrent-client/info"
-	"github.com/ritwik310/torrent-client/queue"
 	"github.com/ritwik310/torrent-client/torrent"
 	"github.com/ritwik310/torrent-client/tracker"
 	"github.com/sirupsen/logrus"
@@ -64,23 +65,62 @@ func main() {
 		fmt.Printf("unsupported announce protocol, %v\n", torr.AnnounceURL.Scheme)
 	}
 
-	que := queue.NewQueue(torr.Pieces)
+	// que := queue.NewQueue(torr.Pieces)
 
 	var wg sync.WaitGroup
+
+	go func() {
+		for {
+			time.Sleep(3 * time.Second)
+			PrintMemUsage()
+		}
+	}()
 
 	// var activePeers []*Peers
 
 	for i := 0; i < len(tracker.Peers); i++ {
 		p := tracker.Peers[i]
 		wg.Add(1)
-		go p.GetPieces(tracker.Torrent, &wg, que)
+		// go p.GetPieces(tracker.Torrent, &wg, que)
+		go p.Start()
 	}
 
-	// time.Sleep(time.Second * 15)
+	time.Sleep(time.Second * 15)
+
+	for _, p := range tracker.Peers {
+		if p.UnChoked {
+			logrus.Infof("peer found %v\n", p.Conn.RemoteAddr())
+		} else {
+			p.Stop()
+			p.Close()
+		}
+
+	}
 
 	wg.Wait()
 
 	// for {
 	// }
 
+}
+
+// PrintMemUsage outputs the current, total and OS memory being used. As well as the number
+// of garage collection cycles completed.
+func PrintMemUsage() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	if bToMb(m.TotalAlloc) >= 80000 {
+		os.Exit(3)
+	}
+
+	// For info on each, see: https://golang.org/pkg/runtime/#MemStats
+	fmt.Printf("Alloc = %v MiB", bToMb(m.Alloc))
+	fmt.Printf("\tTotalAlloc = %v MiB", bToMb(m.TotalAlloc))
+	fmt.Printf("\tSys = %v MiB", bToMb(m.Sys))
+	fmt.Printf("\tNumGC = %v\n", m.NumGC)
+}
+
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
 }

@@ -94,7 +94,11 @@ func (t *Tracker) GetPeersHTTP() (uint32, error) {
 				break
 			}
 			// reading peer info and appending it the the tracker struct,
-			peer := peer.Peer{IP: net.IP(peers[i : i+4]), Port: binary.BigEndian.Uint16(peers[i+4 : i+6])}
+			peer := peer.Peer{
+				IP:      net.IP(peers[i : i+4]),
+				Port:    binary.BigEndian.Uint16(peers[i+4 : i+6]),
+				Torrent: t.Torrent,
+			}
 			t.Peers = append(t.Peers, &peer) // appending peer to tracker.Peers
 			// skip the next 6
 			i += 6
@@ -125,7 +129,7 @@ func trackerurl(torr *torrent.Torrent) (string, error) {
 	pr.Add("compact", "1")                             // 1
 	pr.Add("event", "started")                         // started
 	pr.Add("ip", info.ClientIP.String())               // client's IP, (optional)
-	// pr.Add("numwant", "200")                                    // client's IP, (optional)
+	pr.Add("numwant", "40")                            // number of peer info wanted, (optional)
 
 	// the tracker announce url
 	trkurl.RawQuery = pr.Encode()
@@ -263,7 +267,11 @@ func (t *Tracker) GetPeersUDP(addr string, tid uint32, cid uint64) (uint32, erro
 			break
 		}
 		// reading peer info and appending it the the tracker struct,
-		peer := peer.Peer{IP: net.IP(resp[i : i+4]), Port: binary.BigEndian.Uint16(resp[i+4 : i+6])}
+		peer := peer.Peer{
+			IP:      net.IP(resp[i : i+4]),
+			Port:    binary.BigEndian.Uint16(resp[i+4 : i+6]),
+			Torrent: t.Torrent,
+		}
 		t.Peers = append(t.Peers, &peer)
 		i += 6
 	}
