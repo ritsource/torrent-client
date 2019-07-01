@@ -3,7 +3,7 @@ package peer
 import (
 	"bytes"
 	"encoding/binary"
-	"io"
+	"fmt"
 	"net"
 	"reflect"
 	"strconv"
@@ -29,7 +29,7 @@ type Peer struct {
 
 // Close .
 func (p *Peer) Close() {
-	p.Messaging = false
+	// p.Messaging = false
 	if p.Conn != nil {
 		p.Conn.Close()
 	}
@@ -50,6 +50,9 @@ func (p *Peer) Start() {
 		logrus.Warnf("%v\n", err)
 		return
 	}
+
+	// now := time.Now()
+	// conn.SetDeadline(now.Add(time.Second * 5))
 
 	// Next, our client needs to send some unique identifier
 	// of the torrent and our client, aka a handshake message
@@ -74,6 +77,24 @@ func (p *Peer) Start() {
 	// confirmation. We need to wait for the client to write back
 	p.Messaging = true
 	p.ReadMessages()
+
+	return
+
+	i := 0
+	for {
+		b := make([]byte, 10)
+		nr, err := p.Conn.Read(b)
+		if err != nil {
+			// if err != io.EOF {
+			// 	logrus.Warnf("%v\n", err)
+			break
+			// }
+			// logrus.Warnf("%v\n", err)
+		}
+
+		fmt.Printf("%v ++++++++++ %v - %s\n", i, nr, b)
+		i++
+	}
 }
 
 // handshakeBuf builds and returns a handshake message buffer
@@ -119,12 +140,12 @@ func (p *Peer) ReadMessages() {
 		if err != nil {
 			// if connection (err != io.EOF) is not
 			// open anymore break the iretation
-			if err != io.EOF {
-				logrus.Warnf("%v\n", err)
-				break
-			}
-			// for other kind of errors, skip the rest of the iretation
-			continue
+			// if err != io.EOF {
+			logrus.Warnf("%v\n", err)
+			break
+			// }
+			// // for other kind of errors, skip the rest of the iretation
+			// continue
 		}
 
 		// if read data length is 0, i.e. no message
@@ -157,7 +178,13 @@ func (p *Peer) ReadMessages() {
 				logrus.Infof("handshake successful with %v\n", p.Conn.RemoteAddr())
 			} else {
 				logrus.Infof("%v bytes message from %v\n", explen, p.Conn.RemoteAddr())
-				p.HandleMessages(msgbuf)
+				if explen < 5 {
+					logrus.Infof("invalid messagae recieved\n")
+					logrus.Errorf("%+v\n", len(data))
+					fmt.Printf("%+v\n", data)
+				} else {
+					p.HandleMessages(msgbuf)
+				}
 			}
 
 			msgbuf.Reset()    // reseting the `msgbuf` buffer, message read is complete
@@ -176,6 +203,11 @@ func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 
 		p.Conn.Write(buf.Bytes())
 	} else {
+		// if buf.Len() < 5 {
+		// 	logrus.Infof("invalid messagae recieved\n")
+		// 	return
+		// }
+
 		var length uint32
 		var id uint8
 		binary.Read(buf, binary.BigEndian, &length)
@@ -187,7 +219,7 @@ func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 		switch id {
 		case uint8(0):
 			logrus.Infof("choke\n")
-			p.Close()
+			// p.Close()
 		case uint8(1):
 			logrus.Infof("unchoke\n")
 			p.UnChoked = true

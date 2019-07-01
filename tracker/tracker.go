@@ -26,14 +26,57 @@ func NewTracker(torr *torrent.Torrent) Tracker {
 
 // Tracker struct handles announce and tracker related methods
 type Tracker struct {
-	Torrent      *torrent.Torrent
-	Peers        []*peer.Peer
-	SharingPeers []*peer.Peer
+	Torrent *torrent.Torrent
+	Peers   []*peer.Peer
+	// SharingPeers []*peer.Peer
 }
 
-// GetPeersHTTP sends tracker request to the announce address
+// GetPeers .
+func (t *Tracker) GetPeers() error {
+	// check protocol
+	switch t.Torrent.AnnounceURL.Scheme {
+	case "udp":
+		// sending connection request to UDP server (the announce host) and reading responses
+		tID, connID, err := t.ConnUDP(t.Torrent.AnnounceURL.Host, info.TransactionID)
+		if err != nil {
+			return err
+		}
+		if tID != info.TransactionID {
+			return fmt.Errorf("transaction_id is the request and response did not match %v != %v", info.TransactionID, tID)
+		}
+
+		// once connection request is successfule, sending announce request
+		// this will mainly get us a list of seeders for that torrent files
+		interval, err := t.ReadPeersUDP(t.Torrent.AnnounceURL.Host, tID, connID)
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("interval:", interval)
+
+		return nil
+
+	case "http":
+		// if the announce scheme is http then send a http tracker request,
+		// this poputate tracker with peers
+		interval, err := t.ReadPeersHTTP()
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Println("interval:", interval)
+
+		return nil
+
+	default:
+		return fmt.Errorf("unsupported announce protocol, %v", t.Torrent.AnnounceURL.Scheme)
+		// return nil, fmt.Errorf("unsupported announce protocol %v", t.Torrent.AnnounceURL.Scheme)
+	}
+}
+
+// ReadPeersHTTP sends tracker request to the announce address
 // reads the relevent data (peers and stuff)
-func (t *Tracker) GetPeersHTTP() (uint32, error) {
+func (t *Tracker) ReadPeersHTTP() (uint32, error) {
 	// populating tracker announce url with
 	// appropriate param values from the Torr
 	trkurl, err := trackerurl(t.Torrent)
@@ -198,9 +241,9 @@ func (t *Tracker) ConnUDP(addr string, tid uint32) (uint32, uint64, error) {
 	return BE.Uint32(resp[4:8]), BE.Uint64(resp[8:16]), err
 }
 
-// GetPeersUDP sends a UDP announce request to the server, takes care
+// ReadPeersUDP sends a UDP announce request to the server, takes care
 // of formatting request data and populating Tracker with peers and other relevent data
-func (t *Tracker) GetPeersUDP(addr string, tid uint32, cid uint64) (uint32, error) {
+func (t *Tracker) ReadPeersUDP(addr string, tid uint32, cid uint64) (uint32, error) {
 	numseed := 20 // number of requested seeders
 
 	// building buffer to be sent with the announce request
