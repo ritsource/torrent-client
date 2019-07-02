@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"runtime"
 	"strconv"
 
 	"github.com/ritwik310/torrent-client/info"
@@ -18,26 +19,19 @@ var PeerProtocolV1 = []byte("BitTorrent protocol")
 
 // Peer ..
 type Peer struct {
-	IP        net.IP
-	Port      uint16
-	Torrent   *torrent.Torrent
-	Conn      net.Conn
-	Messaging bool
-	UnChoked  bool
-	Bitfield  []int8
+	IP       net.IP
+	Port     uint16
+	Torrent  *torrent.Torrent
+	Conn     net.Conn
+	UnChoked bool
+	Bitfield []int8
 }
 
 // Close .
 func (p *Peer) Close() {
-	// p.Messaging = false
 	if p.Conn != nil {
 		p.Conn.Close()
 	}
-}
-
-// Stop .
-func (p *Peer) Stop() {
-	p.Messaging = false
 }
 
 // Start .
@@ -75,26 +69,7 @@ func (p *Peer) Start() {
 	// info_hash in handshake request), they will close the connection,
 	// but if they do then they should send back a similar message as
 	// confirmation. We need to wait for the client to write back
-	p.Messaging = true
 	p.ReadMessages()
-
-	return
-
-	i := 0
-	for {
-		b := make([]byte, 10)
-		nr, err := p.Conn.Read(b)
-		if err != nil {
-			// if err != io.EOF {
-			// 	logrus.Warnf("%v\n", err)
-			break
-			// }
-			// logrus.Warnf("%v\n", err)
-		}
-
-		fmt.Printf("%v ++++++++++ %v - %s\n", i, nr, b)
-		i++
-	}
 }
 
 // handshakeBuf builds and returns a handshake message buffer
@@ -133,9 +108,9 @@ func (p *Peer) ReadMessages() {
 
 	// continiously reading from the
 	// client unless the connection fails
-	for p.Messaging {
+	for {
 		// reading from teh peer connection
-		b := make([]byte, 1024)
+		b := make([]byte, 1024*16)
 		nr, err := p.Conn.Read(b)
 		if err != nil {
 			// if connection (err != io.EOF) is not
@@ -157,6 +132,11 @@ func (p *Peer) ReadMessages() {
 		// data recieved from the peer
 		data := b[:nr]
 
+		var m1 runtime.MemStats
+		var m2 runtime.MemStats
+
+		runtime.ReadMemStats(&m1)
+
 		// explen is the expected length of the message, required for
 		// combining different data streams as a single messages, it's
 		// value varies for handshake messages & all the other messages
@@ -164,8 +144,24 @@ func (p *Peer) ReadMessages() {
 		if handshake {
 			explen = int(data[0]) + 49
 		} else {
-			explen = int(binary.BigEndian.Uint32(b[:4])) + 4
+			// for all non-handshake messages, the data starts with a uint32
+			// (4 bytes) that is the length of the whole message
+			ln := int(binary.BigEndian.Uint32(b[:4]))
+			if ln == 0 {
+				logrus.Infof("%v bytes message from %v\n", len(data), p.Conn.RemoteAddr())
+				logrus.Infof("invalid messagae recieved \n%s\n", data)
+				continue
+			}
+
+			// +4 added because the data that represents length at start
+			explen = ln + 4
 		}
+
+		runtime.ReadMemStats(&m2)
+
+		t1 := m1.TotalAlloc / 1024 / 1024
+		t2 := m2.TotalAlloc / 1024 / 1024
+		fmt.Printf("==================================================> %v -- %v\n", t1, t2)
 
 		// add the current data chunk to a buffer that is responsible
 		// for storing data unless the message completes
@@ -178,13 +174,7 @@ func (p *Peer) ReadMessages() {
 				logrus.Infof("handshake successful with %v\n", p.Conn.RemoteAddr())
 			} else {
 				logrus.Infof("%v bytes message from %v\n", explen, p.Conn.RemoteAddr())
-				if explen < 5 {
-					logrus.Infof("invalid messagae recieved\n")
-					logrus.Errorf("%+v\n", len(data))
-					fmt.Printf("%+v\n", data)
-				} else {
-					p.HandleMessages(msgbuf)
-				}
+				p.HandleMessages(msgbuf)
 			}
 
 			msgbuf.Reset()    // reseting the `msgbuf` buffer, message read is complete
@@ -203,11 +193,6 @@ func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 
 		p.Conn.Write(buf.Bytes())
 	} else {
-		// if buf.Len() < 5 {
-		// 	logrus.Infof("invalid messagae recieved\n")
-		// 	return
-		// }
-
 		var length uint32
 		var id uint8
 		binary.Read(buf, binary.BigEndian, &length)
@@ -219,7 +204,7 @@ func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 		switch id {
 		case uint8(0):
 			logrus.Infof("choke\n")
-			// p.Close()
+			p.Close()
 		case uint8(1):
 			logrus.Infof("unchoke\n")
 			p.UnChoked = true
@@ -258,4 +243,31 @@ func (p *Peer) handleBitfield(payload []byte) {
 			p.Bitfield[i*8+j] = int8(b >> uint(7-j) & 0x01)
 		}
 	}
+
+}
+
+// RequestPiece .
+func (p *Peer) RequestPiece(b *torrent.Block) {
+	buf := new(bytes.Buffer)
+	binary.Write(buf, binary.BigEndian, uint32(13))
+	binary.Write(buf, binary.BigEndian, uint8(6))
+	binary.Write(buf, binary.BigEndian, b.Index) // piece index
+	binary.Write(buf, binary.BigEndian, b.Begin)
+	binary.Write(buf, binary.BigEndian, b.Length)
+
+	_, err := p.Conn.Write(buf.Bytes())
+	if err != nil {
+		// logrus.Errorf("couldn't write request message, %v\n", err)
+		return
+	}
+
+	// logrus.Infof("written %v bytes as piece request to %v\n", nw, p.Conn.RemoteAddr())
+	b.Status = torrent.BlockRequested
+
+	// go func(bl *torrent.Block) {
+	// 	time.Sleep(30 * time.Second)
+	// 	if bl.Status != torrent.BlockDownloaded {
+	// 		logrus.Errorf("ERRORRRRRR -> Block download failed %+v\n", bl)
+	// 	}
+	// }(b)
 }

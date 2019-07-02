@@ -54,7 +54,7 @@ func NewTorrent(fn string) (*Torrent, error) {
 
 		// reading pieces and appending each hash to t.Pieces property
 		for i := 0; i+20 <= len(pieces); i += 20 {
-			t.Pieces = append(t.Pieces, &Piece{Status: 0, Hash: pieces[i : i+20], Index: i / 20})
+			t.Pieces = append(t.Pieces, &Piece{Status: 0, Hash: pieces[i : i+20], Index: i / 20, Length: pl})
 		}
 
 		t.PieceLen = pl
@@ -83,9 +83,10 @@ type Torrent struct {
 const (
 	PieceNotFound   uint8 = 0 // Initial state, and when no bitfield or have request contains the piece-index
 	PieceFound      uint8 = 1 // when atleast 1 have/bitfield request contains teh piece-index
-	PieceRequested  uint8 = 2 // when piece whave been requested to a peer
-	PieceDownloaded uint8 = 3 // when piece download has successfully been completed
-	PieceFailed     uint8 = 4 // when piece download has not been successful (failed once)
+	BlockExist      uint8 = 0 // when piece whave been requested to a peer
+	BlockRequested  uint8 = 1 // when piece whave been requested to a peer
+	BlockDownloaded uint8 = 2 // when piece download has successfully been completed
+	BlockFailed     uint8 = 3 // when piece download has not been successful (failed once)
 )
 
 // Piece represents a chunk of the actual file that needed to be downloaded
@@ -96,5 +97,30 @@ type Piece struct {
 	Status uint8
 	Hash   []byte
 	Length int
+	Blocks []*Block
 	// Peers - peers who have that (probably)
+}
+
+// Block .
+type Block struct {
+	Index  uint32 // **** Piece Index ****
+	Begin  uint32
+	Length uint32
+	Status uint8
+}
+
+// Blockize .
+func (p *Piece) Blockize() {
+	nBlock := int(math.Ceil(float64(p.Length / BlockLength)))
+
+	for i := 0; i < nBlock; i++ {
+		var ln int
+		if i == nBlock-1 {
+			ln = p.Length % BlockLength
+		} else {
+			ln = BlockLength
+		}
+
+		p.Blocks = append(p.Blocks, &Block{Index: uint32(p.Index), Begin: uint32(i * BlockLength), Length: uint32(ln), Status: BlockExist})
+	}
 }

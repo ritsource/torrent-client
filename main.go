@@ -29,52 +29,122 @@ func main() {
 	// new tracker
 	tracker := tracker.NewTracker(torr)
 
+	// fmt.Println("Getting peers")
 	err = tracker.GetPeers()
 	if err != nil {
 		logrus.Panicf("couldn't read peers, %v", err)
 	}
 
+	// fmt.Println("len(torr.Pieces)", len(torr.Pieces))
+
 	go func() {
 		for {
 			time.Sleep(3 * time.Second)
-			PrintMemUsage()
+			fmt.Println("x-x-x-x")
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+
+			fmt.Printf("\tGo routines -> %v\n", runtime.NumGoroutine())
+			tot := m.TotalAlloc / 1024 / 1024
+			fmt.Printf("\tMemory alloc -> %v MiB\n", tot)
+			fmt.Println("x-x-x-x")
+
+			if tot > 50 {
+				os.Exit(3)
+			}
 		}
 	}()
 
-	var wg sync.WaitGroup
+	ch := make(chan string)
+
+	go func(t *torrent.Torrent, ch chan string) {
+		for _, p := range t.Pieces {
+			p.Blockize()
+		}
+		ch <- "done"
+	}(torr, ch)
 
 	for _, p := range tracker.Peers {
 		fmt.Printf("%+v\n", p)
-		wg.Add(1)
 		go p.Start()
 	}
 
-	wg.Wait()
+	time.Sleep(20 * time.Second)
 
-	// for {
+	<-ch
+	// for _, piece := range torr.Pieces {
+	// 	fmt.Printf("%+v\n", *piece)
 	// }
+	// var wg sync.WaitGroup
 
-}
+	pieceidx := 0
+	blockidx := 0
+	peeridx := 0
+	piececoverage := 0 // how many peers has been checked for a piece
 
-// PrintMemUsage outputs the current, total and OS memory being used. As well as the number
-// of garage collection cycles completed.
-func PrintMemUsage() {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	var bRequested []int
 
-	if bToMb(m.TotalAlloc) >= 2000 {
-		os.Exit(3)
+	go func(br *[]int) {
+		for {
+			time.Sleep(3 * time.Second)
+			fmt.Println("------------------->", len(bRequested))
+		}
+	}(&bRequested)
+
+	var wg sync.WaitGroup
+
+	for {
+		time.Sleep(time.Millisecond * 100)
+		// if all peers has been checked and none of them contains
+		// the piece skip that piece by pieceidx++, piececoverage
+		// contains how many peers has been checked for a piece
+		if piececoverage >= len(tracker.Peers) {
+			pieceidx++
+		}
+
+		if pieceidx == len(torr.Pieces) {
+			time.Sleep(5 * time.Second)
+			blockidx = 0
+			pieceidx = 0
+		}
+
+		if peeridx == len(tracker.Peers) {
+			peeridx = 0
+		}
+
+		piece := torr.Pieces[pieceidx]
+		block := piece.Blocks[blockidx]
+		peer := tracker.Peers[peeridx]
+
+		if !peer.UnChoked {
+			peeridx++
+			continue
+		}
+
+		if len(peer.Bitfield) >= pieceidx+1 && peer.Bitfield[pieceidx] == 1 {
+
+			if block.Status == torrent.BlockExist || block.Status == torrent.BlockFailed {
+				peer.RequestPiece(block)
+				bRequested = append(bRequested, blockidx)
+			}
+
+			blockidx++
+
+			if blockidx == len(piece.Blocks) {
+				pieceidx++
+				piececoverage = 0
+				blockidx = 0
+			}
+
+			peeridx++
+		} else {
+			piececoverage++
+			peeridx++
+		}
+
 	}
 
-	fmt.Printf("NumGoroutine -> %v\n", runtime.NumGoroutine())
+	wg.Add(1)
+	wg.Wait()
 
-	// For info on each, see: https://golang.org/pkg/runtime/#MemStats
-	fmt.Printf("Alloc = %v MiB", bToMb(m.Alloc))
-	fmt.Printf("\tTotalAlloc = %v MiB", bToMb(m.TotalAlloc))
-	fmt.Printf("\tSys = %v MiB", bToMb(m.Sys))
-	fmt.Printf("\tNumGC = %v\n", m.NumGC)
-}
-
-func bToMb(b uint64) uint64 {
-	return b / 1024 / 1024
 }
