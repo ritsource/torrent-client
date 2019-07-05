@@ -3,9 +3,12 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
+	"github.com/ritwik310/torrent-client/torrent"
+	"github.com/ritwik310/torrent-client/tracker"
 	"github.com/sirupsen/logrus"
 )
 
@@ -18,107 +21,100 @@ func main() {
 	fn := os.Args[1]
 
 	// // reading the torrent file
-	torr, err := NewTorrent(fn)
+	torr, err := torrent.NewTorrent(fn)
 	if err != nil {
 		logrus.Panicf("%v\n", err)
 	}
 
 	// new tracker
-	tracker := NewTracker(torr)
+	tracker := tracker.NewTracker(torr)
 
-	// check protocol
-	switch torr.AnnounceURL.Scheme {
-	case "udp":
-		// sending connection request to UDP server (the announce host) and reading responses
-		tID, connID, err := tracker.ConnUDP(torr.AnnounceURL.Host, TransactionID)
-		if err != nil {
-			panic(err)
-		}
-		if tID != TransactionID {
-			panic(fmt.Sprintf("transaction_id is the request and response did not match %v != %v \n", TransactionID, tID))
-		}
-
-		// once connection request is successfule, sending announce request
-		// this will mainly get us a list of seeders for that torrent files
-		interval, err := tracker.GetPeersUDP(torr.AnnounceURL.Host, tID, connID)
-		if err != nil {
-			panic(err)
-		}
-
-		fmt.Println("interval:", interval)
-
-	case "http":
-		// if the announce scheme is http then send a http tracker request,
-		// this poputate tracker with peers
-		interval, err := tracker.GetPeersHTTP()
-		if err != nil {
-			panic(err)
-		}
-
-		fmt.Println("interval:", interval)
-
-	default:
-		fmt.Printf("unsupported announce protocol, %v\n", torr.AnnounceURL.Scheme)
+	// fmt.Println("Getting peers")
+	err = tracker.GetPeers()
+	if err != nil {
+		logrus.Panicf("couldn't read peers, %v", err)
 	}
 
-	// return
-
-	var activePeers []*Peer
-
-	fmt.Printf("Number of peers: %v\n", len(tracker.Peers))
-
-	for i := 0; i < len(tracker.Peers); i++ {
-		p := tracker.Peers[i]
-
-		ch := make(chan *Peer)
-		go p.GetPieces(tracker.Torrent, ch)
-
-		go func(c chan *Peer) {
-			activePeers = append(activePeers, <-ch)
-		}(ch)
-	}
+	// fmt.Println("len(torr.Pieces)", len(torr.Pieces))
 
 	go func() {
 		for {
-			time.Sleep(10 * time.Second)
-			for _, v := range activePeers {
-				fmt.Printf("Peer -> %v / %v\n", v.IP, v.Port)
+			time.Sleep(3 * time.Second)
+			fmt.Println("x-x-x-x")
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+
+			fmt.Printf("\tGo routines -> %v\n", runtime.NumGoroutine())
+			tot := m.TotalAlloc / 1024 / 1024
+			fmt.Printf("\tMemory alloc -> %v MiB\n", tot)
+			fmt.Println("x-x-x-x")
+
+			if tot > 50 {
+				os.Exit(3)
 			}
 		}
 	}()
 
-	// return
+	ch := make(chan string)
 
-	// go func() {
-	// 	time.Sleep(20 * time.Second)
-	// 	os.Exit(0)
-	// }()
+	go func(t *torrent.Torrent, ch chan string) {
+		for _, p := range t.Pieces {
+			p.Blockize()
+		}
+		ch <- "done"
+	}(torr, ch)
 
-	fmt.Println("Starting Download....")
+	for i, p := range tracker.Peers {
+		if i > 9 {
+			break
+		}
+		fmt.Printf("%+v\n", p)
+		go p.Start()
+	}
+
+	time.Sleep(20 * time.Second)
+
+	<-ch
+	// for _, piece := range torr.Pieces {
+	// 	fmt.Printf("%+v\n", *piece)
+	// }
+	// var wg sync.WaitGroup
 
 	pieceidx := 0
+	blockidx := 0
 	peeridx := 0
-	piececoverage := 0
+	piececoverage := 0 // how many peers has been checked for a piece
+
+	var bRequested []int
+
+	go func(br *[]int) {
+		for {
+			time.Sleep(3 * time.Second)
+			fmt.Println("------------------->", len(bRequested))
+		}
+	}(&bRequested)
 
 	var wg sync.WaitGroup
-
-	// go func(w *sync.WaitGroup) {
-	// 	fmt.Printf("%v\n", w.)
-	// }(&wg)
 
 	i := 0
 
 	for {
-		time.Sleep(time.Millisecond * 400)
-		fmt.Println("---------------------------------------------------------------->", i)
-		i++
 
+		// if i > 100 {
+		// 	break
+		// }
+
+		time.Sleep(time.Millisecond * 100)
+		// if all peers has been checked and none of them contains
+		// the piece skip that piece by pieceidx++, piececoverage
+		// contains how many peers has been checked for a piece
 		if piececoverage >= len(tracker.Peers) {
 			pieceidx++
 		}
 
 		if pieceidx == len(torr.Pieces) {
-			// wg.Wait()
+			time.Sleep(5 * time.Second)
+			blockidx = 0
 			pieceidx = 0
 		}
 
@@ -127,28 +123,30 @@ func main() {
 		}
 
 		piece := torr.Pieces[pieceidx]
+		block := piece.Blocks[blockidx]
 		peer := tracker.Peers[peeridx]
 
-		// fmt.Println("sharing ------------> ", peeridx, peer.Sharing)
-		if !peer.Sharing {
+		if !peer.UnChoked {
 			peeridx++
 			continue
 		}
 
-		if piece.Status == PieceNotFound && peer.Pieces[pieceidx] == 1 {
+		if len(peer.Bitfield) >= pieceidx+1 && peer.Bitfield[pieceidx] == 1 {
 
-			// if peer.Pieces[pieceidx] == 1 {
-			// 	fmt.Println("AAAAAAAAAAAAAAAAAAAAAAAAAAAF")
-			// } else {
-			// 	fmt.Println("SSSSSSSSSSSSSSSSSSSSSSSSSSSF")
-			// }
+			if block.Status == torrent.BlockExist || block.Status == torrent.BlockFailed {
+				peer.RequestPiece(block)
+				bRequested = append(bRequested, blockidx)
+				i++
+			}
 
-			fmt.Println("{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{------------>", pieceidx)
+			blockidx++
 
-			wg.Add(1)
-			peer.Download(piece, &wg)
-			pieceidx++
-			piececoverage = 0
+			if blockidx == len(piece.Blocks) {
+				pieceidx++
+				piececoverage = 0
+				blockidx = 0
+			}
+
 			peeridx++
 		} else {
 			piececoverage++
@@ -156,5 +154,14 @@ func main() {
 		}
 
 	}
+
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			fmt.Println("Hohahahahhaha")
+		}
+	}()
+	wg.Add(1)
+	wg.Wait()
 
 }
