@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net"
 	"reflect"
-	"runtime"
 	"strconv"
+	"time"
 
 	"github.com/ritwik310/torrent-client/info"
 	"github.com/ritwik310/torrent-client/torrent"
@@ -89,7 +89,7 @@ func handshakeBuf(torr *torrent.Torrent) (*bytes.Buffer, error) {
 
 // isHandshake checks if a message data is handshake or not
 func isHandshake(b []byte) bool {
-	return reflect.DeepEqual(b[1:20], PeerProtocolV1)
+	return len(b) >= 20 && reflect.DeepEqual(b[1:20], PeerProtocolV1)
 }
 
 // ReadMessages .
@@ -106,12 +106,16 @@ func (p *Peer) ReadMessages() {
 	// the first message has totally been read we will decleare the handshake as `false`
 	handshake := true
 
+	var explen int // expected length, indicates how far a messgae should be read a single message
+	var start = true
+
 	// continiously reading from the
 	// client unless the connection fails
 	for {
+		time.Sleep(1 / 10 * time.Second)
 		// reading from teh peer connection
-		b := make([]byte, 1024*16)
-		nr, err := p.Conn.Read(b)
+		data := make([]byte, 1024)
+		nr, err := p.Conn.Read(data)
 		if err != nil {
 			// if connection (err != io.EOF) is not
 			// open anymore break the iretation
@@ -130,55 +134,52 @@ func (p *Peer) ReadMessages() {
 		}
 
 		// data recieved from the peer
-		data := b[:nr]
+		b := data[:nr]
 
-		var m1 runtime.MemStats
-		var m2 runtime.MemStats
+		if nr > 0 {
 
-		runtime.ReadMemStats(&m1)
+			if start {
 
-		// explen is the expected length of the message, required for
-		// combining different data streams as a single messages, it's
-		// value varies for handshake messages & all the other messages
-		var explen int
-		if handshake {
-			explen = int(data[0]) + 49
-		} else {
-			// for all non-handshake messages, the data starts with a uint32
-			// (4 bytes) that is the length of the whole message
-			ln := int(binary.BigEndian.Uint32(b[:4]))
-			if ln == 0 {
-				logrus.Infof("%v bytes message from %v\n", len(data), p.Conn.RemoteAddr())
-				logrus.Infof("invalid messagae recieved \n%s\n", data)
-				continue
+				// for handshake message (generally the first message) length of message is different, so the
+				// value of `explen` will be extracted differently, (49+len(x)); x = length of protocol-string
+				// to learn more, https://wiki.theory.org/index.php/BitTorrentSpecification#Handshake
+				if handshake {
+					// reading the protocol string ("BitTorrent protocol" for version 1) length
+					bf := new(bytes.Buffer)
+					bf.Write(b)
+					l, err := bf.ReadByte() // l, length specified at the start of
+					if err != nil {
+						logrus.Warnf("error on handshake response - %v\n", err)
+					}
+
+					// explen = (49+len(x)); for handshake message
+					explen = int(uint8(l)) + 49
+				} else {
+					// for all other message type, the first 4 bytes (uint32) defines
+					// the length of message data. So, reading the data `explen` to that
+					explen = int(binary.BigEndian.Uint32(b[:4])) + 4
+				}
 			}
 
-			// +4 added because the data that represents length at start
-			explen = ln + 4
-		}
+			fmt.Println("explen **********", explen)
 
-		runtime.ReadMemStats(&m2)
+			start = false
+			// writing the crrently read data to `msgbuf` buffer (later will be reset once message read is complete)
+			msgbuf.Write(b)
 
-		t1 := m1.TotalAlloc / 1024 / 1024
-		t2 := m2.TotalAlloc / 1024 / 1024
-		fmt.Printf("==================================================> %v -- %v\n", t1, t2)
+			// fmt.Println("explen -> ", explen)
 
-		// add the current data chunk to a buffer that is responsible
-		// for storing data unless the message completes
-		msgbuf.Write(data)
+			// once `msgbuf` lnegth is equal to (or greater than) `explen`,
+			// the message read is complete, doing what to do _________
+			if msgbuf.Len() >= 4 && msgbuf.Len() >= explen {
+				// fmt.Printf("Okay %v %v %s\n", conn.RemoteAddr(), msgbuf.Len(), msgbuf.Bytes())
 
-		// if at the end (chunk) of a message, then handling it
-		if msgbuf.Len() >= 4 && msgbuf.Len() >= explen {
-			// check if handshake message of other kind
-			if handshake && isHandshake(msgbuf.Bytes()) {
-				logrus.Infof("handshake successful with %v\n", p.Conn.RemoteAddr())
-			} else {
-				logrus.Infof("%v bytes message from %v\n", explen, p.Conn.RemoteAddr())
 				p.HandleMessages(msgbuf)
-			}
 
-			msgbuf.Reset()    // reseting the `msgbuf` buffer, message read is complete
-			handshake = false // handshake is settin g to false (can only be true for first message read)
+				start = true
+				msgbuf.Reset()    // reseting the `msgbuf` buffer, message read is complete
+				handshake = false // handshake is settin g to false (can only be true for first message read)
+			}
 		}
 	}
 }
@@ -186,47 +187,70 @@ func (p *Peer) ReadMessages() {
 // HandleMessages .
 func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 	if isHandshake(buf.Bytes()) {
+		logrus.Infof("handshake message recieved - %v\n", p.Conn.RemoteAddr())
+
+		return
 		// writing interested message
 		buf := new(bytes.Buffer)
 		binary.Write(buf, binary.BigEndian, uint32(1))
 		binary.Write(buf, binary.BigEndian, uint8(2))
 
 		p.Conn.Write(buf.Bytes())
-	} else {
-		var length uint32
-		var id uint8
-		binary.Read(buf, binary.BigEndian, &length)
-		binary.Read(buf, binary.BigEndian, &id)
 
-		payload := make([]byte, length-1)
-		binary.Read(buf, binary.BigEndian, &payload)
-
-		switch id {
-		case uint8(0):
-			logrus.Infof("choke\n")
-			p.Close()
-		case uint8(1):
-			logrus.Infof("unchoke\n")
-			p.UnChoked = true
-		case uint8(2):
-			logrus.Infof("interested\n")
-		case uint8(3):
-			logrus.Infof("not interested\n")
-		case uint8(4):
-			logrus.Infof("have\n")
-		case uint8(5):
-			logrus.Infof("-> bitfield\n")
-			p.handleBitfield(payload)
-		case uint8(6):
-			logrus.Infof("request\n")
-		case uint8(7):
-			logrus.Infof("piece\n")
-		case uint8(8):
-			logrus.Infof("cancel\n")
-		case uint8(9):
-			logrus.Infof("port\n")
-		}
+		return
 	}
+
+	b := buf.Bytes()
+
+	if len(b) < 4+1 {
+		logrus.Errorf("invalid message - %v", p.Conn.RemoteAddr())
+		return
+	}
+
+	length := binary.BigEndian.Uint32(b[:4])
+
+	if len(b) < int(length)+4 || length == 0 {
+		logrus.Errorf("invalid message - %v", p.Conn.RemoteAddr())
+		return
+	}
+
+	fmt.Println("len ->", len(b))
+	id := b[4]
+
+	var payload []byte
+	if len(b) > 5 {
+		payload = b[5:]
+	}
+
+	logrus.Infof("message length %v bytes", len(b))
+	fmt.Printf("🍎%v\n", b)
+
+	switch id {
+	case uint8(0):
+		logrus.Infof("choke\n")
+		p.Close()
+	case uint8(1):
+		logrus.Infof("unchoke\n")
+		p.UnChoked = true
+	case uint8(2):
+		logrus.Infof("interested\n")
+	case uint8(3):
+		logrus.Infof("not interested\n")
+	case uint8(4):
+		logrus.Infof("have\n")
+	case uint8(5):
+		logrus.Infof("-> bitfield\n")
+		p.handleBitfield(payload)
+	case uint8(6):
+		logrus.Infof("request\n")
+	case uint8(7):
+		logrus.Infof("piece\n")
+	case uint8(8):
+		logrus.Infof("cancel\n")
+	case uint8(9):
+		logrus.Infof("port\n")
+	}
+
 }
 
 func (p *Peer) handleBitfield(payload []byte) {

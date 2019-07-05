@@ -64,7 +64,10 @@ func main() {
 		ch <- "done"
 	}(torr, ch)
 
-	for _, p := range tracker.Peers {
+	for i, p := range tracker.Peers {
+		if i > 9 {
+			break
+		}
 		fmt.Printf("%+v\n", p)
 		go p.Start()
 	}
@@ -93,7 +96,14 @@ func main() {
 
 	var wg sync.WaitGroup
 
+	i := 0
+
 	for {
+
+		// if i > 100 {
+		// 	break
+		// }
+
 		time.Sleep(time.Millisecond * 100)
 		// if all peers has been checked and none of them contains
 		// the piece skip that piece by pieceidx++, piececoverage
@@ -126,6 +136,7 @@ func main() {
 			if block.Status == torrent.BlockExist || block.Status == torrent.BlockFailed {
 				peer.RequestPiece(block)
 				bRequested = append(bRequested, blockidx)
+				i++
 			}
 
 			blockidx++
@@ -144,6 +155,12 @@ func main() {
 
 	}
 
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			fmt.Println("Hohahahahhaha")
+		}
+	}()
 	wg.Add(1)
 	wg.Wait()
 

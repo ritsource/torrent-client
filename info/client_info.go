@@ -22,7 +22,7 @@ var (
 func init() {
 	// Generating a somewhat random ClientID (PeerID)
 	rand.Seed(time.Now().UnixNano())
-	letters := []byte("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	letters := []byte("abklmnopLSTUVOPQYWXtuvcdqHIJKfghMrsRijwxyzABCDEFeGHIJKfghMNZ")
 	id := []byte("-TC0001-")
 
 	// Generating the random part of PeerIP, to learn more -
