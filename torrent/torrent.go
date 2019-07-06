@@ -57,6 +57,8 @@ func NewTorrent(fn string) (*Torrent, error) {
 			t.Pieces = append(t.Pieces, &Piece{Status: 0, Hash: pieces[i : i+20], Index: i / 20, Length: pl})
 		}
 
+		t.FileName = info["name"].(string)
+
 		t.PieceLen = pl
 		t.Size = pl * len(t.Pieces) // total size of downloadable file
 
@@ -77,6 +79,8 @@ type Torrent struct {
 	PieceLen    int                    // piece length property (length of each piece in bytes)
 	InfoHash    []byte                 // infohash of the torrent file
 	AnnounceURL *url.URL               // announce URL
+	File        *os.File               // file to write data on
+	FileName    string
 }
 
 // constants required for representing the state of a peer

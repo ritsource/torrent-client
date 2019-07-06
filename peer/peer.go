@@ -161,7 +161,7 @@ func (p *Peer) ReadMessages() {
 				}
 			}
 
-			fmt.Println("explen **********", explen)
+			// fmt.Println("explen **********", explen)
 
 			start = false
 			// writing the crrently read data to `msgbuf` buffer (later will be reset once message read is complete)
@@ -223,7 +223,7 @@ func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 	}
 
 	logrus.Infof("message length %v bytes", len(b))
-	fmt.Printf("🍎%v\n", b)
+	// fmt.Printf("🍎%v\n", b)
 
 	switch id {
 	case uint8(0):
@@ -245,11 +245,38 @@ func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 		logrus.Infof("request\n")
 	case uint8(7):
 		logrus.Infof("piece\n")
+		p.handlePiece(payload)
 	case uint8(8):
 		logrus.Infof("cancel\n")
 	case uint8(9):
 		logrus.Infof("port\n")
 	}
+
+}
+
+func (p *Peer) handlePiece(payload []byte) {
+	if len(payload) < 8+1 {
+		logrus.Errorf("invalid piece request, payload length is < %v", len(payload))
+		return
+	}
+
+	index := int(binary.BigEndian.Uint32(payload[:4])) // piece index
+	begin := int(binary.BigEndian.Uint32(payload[4:8]))
+	data := payload[8:]
+
+	blockidx := begin / torrent.BlockLength
+
+	offset := int64(index*p.Torrent.PieceLen + begin) // offset in file
+
+	nw, err := p.Torrent.File.WriteAt(data, offset)
+	if err != nil {
+		logrus.Errorf("file write error, %v\n", err)
+		p.Torrent.Pieces[index].Blocks[blockidx].Status = torrent.BlockFailed
+		return
+	}
+
+	logrus.Errorf("%v bytes written to file\n", nw)
+	p.Torrent.Pieces[index].Blocks[blockidx].Status = torrent.BlockDownloaded
 
 }
 

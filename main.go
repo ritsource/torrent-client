@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path"
 	"runtime"
 	"sync"
 	"time"
@@ -28,6 +29,13 @@ func main() {
 
 	// new tracker
 	tracker := tracker.NewTracker(torr)
+
+	torr.File, err = os.Create(path.Join(".", torr.FileName))
+	if err != nil {
+		logrus.Errorf("%v\n", err)
+	}
+
+	defer torr.File.Close()
 
 	// fmt.Println("Getting peers")
 	err = tracker.GetPeers()
