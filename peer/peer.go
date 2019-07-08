@@ -7,7 +7,6 @@ import (
 	"net"
 	"reflect"
 	"strconv"
-	"time"
 
 	"github.com/ritwik310/torrent-client/info"
 	"github.com/ritwik310/torrent-client/torrent"
@@ -69,7 +68,7 @@ func (p *Peer) Start() {
 	// info_hash in handshake request), they will close the connection,
 	// but if they do then they should send back a similar message as
 	// confirmation. We need to wait for the client to write back
-	p.ReadMessages()
+	go p.ReadMessages()
 }
 
 // handshakeBuf builds and returns a handshake message buffer
@@ -112,7 +111,7 @@ func (p *Peer) ReadMessages() {
 	// continiously reading from the
 	// client unless the connection fails
 	for {
-		time.Sleep(1 / 10 * time.Second)
+		// time.Sleep(1 / 10 * time.Second)
 		// reading from teh peer connection
 		data := make([]byte, 1024)
 		nr, err := p.Conn.Read(data)
@@ -144,16 +143,8 @@ func (p *Peer) ReadMessages() {
 				// value of `explen` will be extracted differently, (49+len(x)); x = length of protocol-string
 				// to learn more, https://wiki.theory.org/index.php/BitTorrentSpecification#Handshake
 				if handshake {
-					// reading the protocol string ("BitTorrent protocol" for version 1) length
-					bf := new(bytes.Buffer)
-					bf.Write(b)
-					l, err := bf.ReadByte() // l, length specified at the start of
-					if err != nil {
-						logrus.Warnf("error on handshake response - %v\n", err)
-					}
-
 					// explen = (49+len(x)); for handshake message
-					explen = int(uint8(l)) + 49
+					explen = int(b[0]) + 49
 				} else {
 					// for all other message type, the first 4 bytes (uint32) defines
 					// the length of message data. So, reading the data `explen` to that
@@ -184,6 +175,9 @@ func (p *Peer) ReadMessages() {
 	}
 }
 
+var foo = false
+var checked = false
+
 // HandleMessages .
 func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 	if isHandshake(buf.Bytes()) {
@@ -209,13 +203,23 @@ func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 
 	length := binary.BigEndian.Uint32(b[:4])
 
+	// logrus.Infof("message length %v bytes", buf.Len())
+
 	if len(b) < int(length)+4 || length == 0 {
 		logrus.Errorf("invalid message - %v", p.Conn.RemoteAddr())
 		return
 	}
 
+	// if b[4] == uint8(7) {
+	// 	return
+	// }
+
 	fmt.Println("len ->", len(b))
 	id := b[4]
+
+	if id == uint8(7) && !foo {
+		foo = true
+	}
 
 	var payload []byte
 	if len(b) > 5 {
@@ -223,7 +227,7 @@ func (p *Peer) HandleMessages(buf *bytes.Buffer) {
 	}
 
 	logrus.Infof("message length %v bytes", len(b))
-	// fmt.Printf("🍎%v\n", b)
+	// fmt.Printf("🍎%v\n", len(payload))
 
 	switch id {
 	case uint8(0):
@@ -268,6 +272,11 @@ func (p *Peer) handlePiece(payload []byte) {
 
 	offset := int64(index*p.Torrent.PieceLen + begin) // offset in file
 
+	p.Torrent.Pieces[index].Blocks[blockidx].Status = torrent.BlockDownloaded
+	logrus.Infof("%v bytes written to file\n", len(data))
+
+	// return
+
 	nw, err := p.Torrent.File.WriteAt(data, offset)
 	if err != nil {
 		logrus.Errorf("file write error, %v\n", err)
@@ -275,13 +284,12 @@ func (p *Peer) handlePiece(payload []byte) {
 		return
 	}
 
-	logrus.Errorf("%v bytes written to file\n", nw)
+	logrus.Infof("%v bytes written to file\n", nw)
 	p.Torrent.Pieces[index].Blocks[blockidx].Status = torrent.BlockDownloaded
 
 }
 
 func (p *Peer) handleBitfield(payload []byte) {
-
 	if len(p.Torrent.Pieces) != len(payload)*8 {
 		logrus.Errorf("piece length mismatch in bitfield message")
 		return

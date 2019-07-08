@@ -57,7 +57,7 @@ func main() {
 			fmt.Printf("\tMemory alloc -> %v MiB\n", tot)
 			fmt.Println("x-x-x-x")
 
-			if tot > 50 {
+			if tot > 2000 {
 				os.Exit(3)
 			}
 		}
@@ -93,14 +93,14 @@ func main() {
 	peeridx := 0
 	piececoverage := 0 // how many peers has been checked for a piece
 
-	var bRequested []int
+	// var bRequested []int
 
-	go func(br *[]int) {
-		for {
-			time.Sleep(3 * time.Second)
-			fmt.Println("------------------->", len(bRequested))
-		}
-	}(&bRequested)
+	// go func(br *[]int) {
+	// 	for {
+	// 		time.Sleep(3 * time.Second)
+	// 		fmt.Println("------------------->", len(bRequested))
+	// 	}
+	// }(&bRequested)
 
 	var wg sync.WaitGroup
 
@@ -112,7 +112,7 @@ func main() {
 		// 	break
 		// }
 
-		time.Sleep(time.Millisecond * 100)
+		time.Sleep(time.Millisecond * 1)
 		// if all peers has been checked and none of them contains
 		// the piece skip that piece by pieceidx++, piececoverage
 		// contains how many peers has been checked for a piece
@@ -143,7 +143,7 @@ func main() {
 
 			if block.Status == torrent.BlockExist || block.Status == torrent.BlockFailed {
 				peer.RequestPiece(block)
-				bRequested = append(bRequested, blockidx)
+				// bRequested = append(bRequested, blockidx)
 				i++
 			}
 
