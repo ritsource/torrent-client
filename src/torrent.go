@@ -13,34 +13,35 @@ import (
 
 // Torr holds teh values read from
 // the provided `.torrent` file
-var Torr *Torrent
+var Torr = &Torrent{}
 
-func init() {
-	// reading the `.torrent` file from the command-line arguements
-	if len(os.Args) < 2 {
-		logrus.Panicf("no `.torrent` file provided")
-	}
-	fn := os.Args[1]
+// ReadFile reads the `.torrent` file provided
+// in the arguemet and populates `Torr` with
+// the relevent data. The torrent specific
+// data is accessable via `src.Torr`
+func ReadFile(fn string) error {
 
-	// reading the `.torrent` file
+	// reading the `.torrent` file content. It
+	// contains information about the files you
+	// wanna download and where to find the
+	// tracker, in a bencode dictionary
 	f, err := os.Open(fn)
 	if err != nil {
-		logrus.Panicf("no `.torrent` file provided")
+		logrus.Errorf("unable to read the `.torrent` file")
+		return err
 	}
 	defer f.Close()
 
-	// decoding bencode dictionary into map[string]interface{}
+	// decoding bencode dictionary into a `map[string]interface{}`
 	dict, err := bencode.Decode(f)
 	if err != nil {
-		logrus.Errorf("unable to decode `.torrent` file")
-		logrus.Panicf("err")
+		logrus.Errorf("unable to decode the `.torrent` file")
+		return err
 	}
 
-	Torr = &Torrent{}
-
-	// populating properties of `Torr`
-	// from the decoded dictionary
-	Torr.Read(&dict)
+	// populating `Torr` with data
+	// read from the decoded dictionary
+	return Torr.Read(&dict)
 }
 
 // File holds value for every file to be downloaded
