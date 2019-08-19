@@ -3,6 +3,7 @@ package src
 import (
 	"crypto/sha1"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path"
@@ -64,6 +65,13 @@ const (
 	BlockFailed     uint8 = 3 // when piece download has not been successful (failed once)
 )
 
+/*
+LengthOfBlock is the length of each block. While downloading pieces
+from the peers, we request pieces in chunks. This is called a block.
+Typically, each block happens to be 2^14 (16384) bytes in size
+*/
+var LengthOfBlock = int(math.Pow(2, 14))
+
 // Block represents a block of data (a chunk of piece)
 type Block struct {
 	PieceIndex uint32 // piece-index of the piece that the block is a part of
@@ -87,6 +95,7 @@ type Torrent struct {
 	DirName  string   // name of the directory
 	PieceLen uint32   // length of each piece in bytes (equal)
 	Pieces   []*Piece // list containing pieces of data
+	Size     int      // total size
 }
 
 // Read reads a bencode dictionary and populates
@@ -126,6 +135,9 @@ func (t *Torrent) Read(dict *map[string]interface{}) error {
 			Index: uint32(i / 20),
 		})
 	}
+
+	// total size of the content, to be downloaded
+	t.Size = int(t.PieceLen) * len(pieces)
 
 	// checking if `info["files"]` property exists. If "yes" then
 	// it's a multi file downloader, else single-file downloader

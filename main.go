@@ -21,6 +21,13 @@ func main() {
 		logrus.Panicf("%v\n", err)
 	}
 
-	fmt.Println(src.PeerID)
+	peers, err := src.GetPeers()
+	if err != nil {
+		logrus.Panicf("%v\n", err)
+	}
+
+	for _, p := range peers {
+		fmt.Printf("%+v\n", p)
+	}
 
 }

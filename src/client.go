@@ -10,9 +10,10 @@ import (
 
 // Something ...
 var (
-	PeerID     string
-	ClientIP   net.IP
-	ClientPort uint32
+	PeerID        string
+	ClientIP      net.IP
+	ClientPort    uint32
+	TransactionID uint32
 )
 
 func init() {
@@ -36,6 +37,8 @@ func init() {
 	ClientPort = 6881
 
 	// fmt.Printf("%s\n", PeerID)
+
+	TransactionID = uint32(time.Now().Unix())
 }
 
 // GenPeerID generates a psudorandom peer-ID
