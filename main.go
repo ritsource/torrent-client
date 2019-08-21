@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/ritwik310/torrent-client/src"
 	"github.com/sirupsen/logrus"
@@ -26,8 +27,26 @@ func main() {
 		logrus.Panicf("%v\n", err)
 	}
 
-	for _, p := range peers {
-		fmt.Printf("%+v\n", p)
+	err = forceStart(peers)
+	if err != nil {
+		logrus.Panicf("%v\n", err)
 	}
 
+	fmt.Printf("%+v\n", src.Status)
+}
+
+/*
+forceStart is gonna disconnect with all the peers
+and reestablish connection with all of them again
+*/
+func forceStart(peers []*src.Peer) error {
+	var wg sync.WaitGroup
+
+	for _, p := range peers {
+		go p.Ping(&wg)
+		wg.Add(1)
+	}
+
+	wg.Wait()
+	return nil
 }
