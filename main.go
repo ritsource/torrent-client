@@ -42,11 +42,15 @@ and reestablish connection with all of them again
 func forceStart(peers []*src.Peer) error {
 	var wg sync.WaitGroup
 
+	fmt.Printf("peers found - %v\n", len(peers))
+
 	for _, p := range peers {
 		go p.Ping(&wg)
 		wg.Add(1)
 	}
 
+	// fmt.Println("y")
 	wg.Wait()
+	// fmt.Println("z")
 	return nil
 }

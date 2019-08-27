@@ -15,7 +15,7 @@ import (
 )
 
 // RequestPeerNum ...
-var RequestPeerNum uint32 = 12
+var RequestPeerNum = 12
 
 // GetPeers returns the peers
 func GetPeers() ([]*Peer, error) {
@@ -32,7 +32,7 @@ func GetPeers() ([]*Peer, error) {
 		// this will mainly get us a list of seeders for that torrent files
 		return GetPeersUDP(Torr.Announce.String(), connID, tranID)
 
-	case "http":
+	case "http", "https":
 		// if the announce scheme is http then send a http tracker request
 		return GetPeersHTTP()
 
@@ -176,8 +176,9 @@ func GetPeersUDP(addr string, connID uint64, tranID uint32) ([]*Peer, error) {
 	i := 20 // i = 21st byte
 
 	// reading the data after 20-bytes, and extracting information about other peers
+	// maximux needed peers <= 12
 	for {
-		if i >= len(resp) {
+		if i >= len(resp) || i >= RequestPeerNum*6 {
 			break
 		}
 
@@ -251,7 +252,7 @@ func udpAnnouncePacket(connID uint64, tranID uint32) ([]byte, error) {
 		uint32(2),
 		ClientIP,
 		uint32(0),
-		RequestPeerNum,
+		uint32(RequestPeerNum),
 		ClientPort,
 	}
 
@@ -332,7 +333,8 @@ func GetPeersHTTP() ([]*Peer, error) {
 
 		i := 0
 		for {
-			if i >= len(d) {
+			// max number of peers 12
+			if i >= len(d) || i >= RequestPeerNum*6 {
 				break
 			}
 
