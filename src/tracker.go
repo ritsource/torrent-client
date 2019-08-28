@@ -15,7 +15,7 @@ import (
 )
 
 // RequestPeerNum ...
-var RequestPeerNum = 12
+var RequestPeerNum = 20
 
 // GetPeers returns the peers
 func GetPeers() ([]*Peer, error) {
@@ -283,16 +283,16 @@ func GetPeersHTTP() ([]*Peer, error) {
 	// to download and number of peers we want
 	pr := url.Values{}
 
-	pr.Add("info_hash", string(Torr.InfoHash))    // torrent info_hash, sha1 hash of encoded (bencode) info_hash property of torr metadata
-	pr.Add("peer_id", PeerID)                     // peer_id, unique identifier for each download
-	pr.Add("port", strconv.Itoa(int(ClientPort))) // post that out client is listening on for sharing data
-	pr.Add("ip", ClientIP.String())               // ip address of the local machine
-	pr.Add("uploaded", "0")                       // how much data has been uploaded
-	pr.Add("downloaded", "0")                     // how much data has been downloaded
-	pr.Add("left", strconv.Itoa(Torr.Size))       // how much data is left to be downloaded
-	pr.Add("compact", "1")                        // 1
-	pr.Add("event", "started")                    // what event this announce request is for
-	pr.Add("numwant", "12")                       //  number of peers we want the server to send back
+	pr.Add("info_hash", string(Torr.InfoHash))      // torrent info_hash, sha1 hash of encoded (bencode) info_hash property of torr metadata
+	pr.Add("peer_id", PeerID)                       // peer_id, unique identifier for each download
+	pr.Add("port", strconv.Itoa(int(ClientPort)))   // post that out client is listening on for sharing data
+	pr.Add("ip", ClientIP.String())                 // ip address of the local machine
+	pr.Add("uploaded", "0")                         // how much data has been uploaded
+	pr.Add("downloaded", "0")                       // how much data has been downloaded
+	pr.Add("left", strconv.Itoa(Torr.Size))         // how much data is left to be downloaded
+	pr.Add("compact", "1")                          // 1
+	pr.Add("event", "started")                      // what event this announce request is for
+	pr.Add("numwant", strconv.Itoa(RequestPeerNum)) //  number of peers we want the server to send back
 
 	trkurl.RawQuery = pr.Encode()
 

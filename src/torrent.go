@@ -53,8 +53,31 @@ type File struct {
 
 // Piece represents an individual piece of data
 type Piece struct {
-	Index uint32 // piece-index
-	Hash  []byte // 20-byte long SHA1-hash of the piece-data, extracted from `.torrent` file
+	Index  uint32   // piece-index
+	Hash   []byte   // 20-byte long SHA1-hash of the piece-data, extracted from `.torrent` file
+	Length uint32   //  size of piece
+	Blocks []*Block // blocks
+}
+
+// GenBlocks .
+func (p *Piece) GenBlocks() {
+	n := int(math.Ceil(float64(p.Length / uint32(LengthOfBlock))))
+
+	for i := 0; i < n; i++ {
+		var ln int
+		if i == n-1 {
+			ln = int(p.Length) % LengthOfBlock
+		} else {
+			ln = LengthOfBlock
+		}
+
+		p.Blocks = append(p.Blocks, &Block{
+			PieceIndex: p.Index,
+			Begin:      uint32(i * LengthOfBlock),
+			Length:     uint32(ln),
+			Status:     BlockExist,
+		})
+	}
 }
 
 // Constants corrosponding to status enum value of of `Block`
@@ -131,8 +154,9 @@ func (t *Torrent) Read(dict *map[string]interface{}) error {
 	// and appending `*Piece` to the `Torrent`
 	for i := 0; i+20 <= len(pieces); i += 20 {
 		t.Pieces = append(t.Pieces, &Piece{
-			Hash:  pieces[i : i+20],
-			Index: uint32(i / 20),
+			Hash:   pieces[i : i+20],
+			Index:  uint32(i / 20),
+			Length: t.PieceLen,
 		})
 	}
 

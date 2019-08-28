@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ritwik310/torrent-client-xx/torrent"
 	"github.com/sirupsen/logrus"
 )
 
@@ -40,7 +41,17 @@ const (
 	PeerNone          = int8(0) // default/zero state
 	PeerHandshaked    = int8(1)
 	PeerBitfieldReady = int8(2)
+	PeerDisconnected  = int8(3)
 )
+
+// Disconnect .
+func (p *Peer) Disconnect() {
+	p.State = PeerDisconnected
+	p.UnChoked = false
+	if p.Conn != nil {
+		p.Conn.Close()
+	}
+}
 
 /*
 Peer represents a single peer
@@ -51,14 +62,21 @@ type Peer struct {
 	Conn     net.Conn
 	Bitfield []bool
 	UnChoked bool
+	Waiting  bool
 	State    int8
 }
 
 // Ping establishes a tcp connection with the peer and handshake request and reads response too to the peer and starts reqding
 func (p *Peer) Ping(wg *sync.WaitGroup) {
-	// defer wg.Done()
-
 	addr := p.IP.String() + ":" + strconv.Itoa(int(p.Port))
+
+	// checking for timeout
+	go func(p *Peer) {
+		time.Sleep(50 * time.Second)
+		if p.State != PeerBitfieldReady || !p.UnChoked {
+			p.Disconnect()
+		}
+	}(p)
 
 	var err error
 	p.Conn, err = net.Dial("tcp", addr)
@@ -92,30 +110,20 @@ func (p *Peer) Ping(wg *sync.WaitGroup) {
 
 	go p.Read()
 
-	// checking for timeout
-	go func(p *Peer) {
-		time.Sleep(40 * time.Second)
-		if p.State == PeerNone && p.Conn != nil {
-			logrus.Warnf("closing peer connection: response read timeout from %v", p.Conn.RemoteAddr())
-			p.Disconnect()
+	for {
+		time.Sleep(5 * time.Second)
+		pingdone := p.UnChoked && p.State >= PeerBitfieldReady
+
+		// fmt.Println("pingdone - ", pingdone)
+		if pingdone || p.State == PeerDisconnected {
+			fmt.Printf("Break - pingdone -> %v : p.State -> %v\n", pingdone, p.State)
+			break
 		}
-	}(p)
 
-	Status.Total++
-	if Status.Total%3 == 0 {
-		Status.Connected++
 	}
 
-	// fmt.Printf("peer: %+v\n", p.IP)
-}
+	defer wg.Done()
 
-// Disconnect .
-func (p *Peer) Disconnect() {
-	p.State = PeerNone
-	p.UnChoked = false
-	if p.Conn != nil {
-		p.Conn.Close()
-	}
 }
 
 // readHsMsg .
@@ -148,15 +156,11 @@ func (p *Peer) Read() {
 	msgbuf := new(bytes.Buffer)
 	var explen int
 
-	for {
-		if p.Conn == nil {
-			break
-		}
-
+	for p.State < PeerDisconnected {
 		d := make([]byte, 1024)
 		nr, err := p.Conn.Read(d)
 		if err != nil {
-			logrus.Errorf("%v\n", err)
+			logrus.Warnf("%v\n", err)
 			break
 		}
 
@@ -277,6 +281,7 @@ func (p *Peer) HandleBitfield(payload []byte) {
 	}
 
 	p.Bitfield = make([]bool, len(payload)*8)
+	// p.Bitfield = make([]bool, len(Torr.Pieces))
 
 	for i, b := range payload {
 		for j := 0; j < 8; j++ {
@@ -289,5 +294,39 @@ func (p *Peer) HandleBitfield(payload []byte) {
 
 }
 
-// RequestPiece .
-func RequestPiece() {}
+// HandleBlock .
+func (p *Peer) HandleBlock(payload []byte) error {
+	if len(payload) < 8+1 {
+		return fmt.Errorf("invalid data, payload length is %v < 9", len(payload))
+	}
+
+	pieceidx := int(binary.BigEndian.Uint32(payload[:4])) // piece index
+	begin := int(binary.BigEndian.Uint32(payload[4:8]))
+	data := payload[8:]
+
+	blkidx := begin / torrent.BlockLength
+
+	fmt.Printf("Piece Index - %v\nBlock Index - %v\nBegin - %v\nData - %v\n", pieceidx, blkidx, begin, data)
+
+	return nil
+}
+
+// RequestBlock .
+func (p *Peer) RequestBlock(blk *Block) error {
+	buf := new(bytes.Buffer)
+	binary.Write(buf, binary.BigEndian, uint32(13))
+	binary.Write(buf, binary.BigEndian, uint8(6))       // id - request message
+	binary.Write(buf, binary.BigEndian, blk.PieceIndex) // piece index
+	binary.Write(buf, binary.BigEndian, blk.Begin)      //
+	binary.Write(buf, binary.BigEndian, blk.Length)
+
+	_, err := p.Conn.Write(buf.Bytes())
+	if err != nil {
+		// logrus.Warnf("couldn't write request message, %v\n", err)
+		return err
+	}
+
+	blk.Status = BlockRequested
+
+	return nil
+}
