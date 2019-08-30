@@ -48,13 +48,14 @@ const (
 Peer represents a single peer
 */
 type Peer struct {
-	IP       net.IP
-	Port     uint16
-	Conn     net.Conn
-	Bitfield []bool
-	UnChoked bool
-	State    int8
-	Waiting  bool
+	IP            net.IP
+	Port          uint16
+	Conn          net.Conn
+	Bitfield      []bool
+	UnChoked      bool
+	State         int8
+	Waiting       bool
+	LastRequested *Block
 }
 
 // IsReady .
@@ -79,15 +80,6 @@ func (p *Peer) Disconnect() {
 // Ping establishes a tcp connection with the peer and handshake request and reads response too to the peer and starts reqding
 func (p *Peer) Ping() error {
 	addr := p.IP.String() + ":" + strconv.Itoa(int(p.Port))
-
-	// // checking for timeout
-	// go func(p *Peer) {
-	// 	time.Sleep(50 * time.Second)
-	// 	fmt.Printf("Timeout!\n%v : state %v : unchoked %v\n", p.State < PeerBitfieldReady || !p.UnChoked, p.State, p.UnChoked)
-	// 	if p.State < PeerBitfieldReady || !p.UnChoked {
-	// 		p.Disconnect()
-	// 	}
-	// }(p)
 
 	var err error
 	p.Conn, err = net.Dial("tcp", addr)
@@ -190,21 +182,31 @@ func (p *Peer) Read() {
 			continue
 		}
 
+		// if msgbuf.Len() >  {
+
+		// }
+
 		if msgbuf.Len() == 0 {
 			explen = int(binary.BigEndian.Uint32(b[:4])) + 4
-			fmt.Printf("%v - %v__ explen: %v, nr: %v\n", p.Conn.RemoteAddr(), i, explen, nr)
+			// fmt.Printf("%v - %v__ explen: %v, nr: %v\n", p.Conn.RemoteAddr(), i, explen, nr)
+		}
+
+		if explen > LengthOfBlock+500 {
+			fmt.Printf("x Disconnect - %v _____________ Explen: %v Block: %v\n", p.Conn.RemoteAddr(), explen, LengthOfBlock)
+			p.Disconnect()
+			break
 		}
 
 		msgbuf.Write(d[:nr])
-		fmt.Printf("%v - %v__ buflen: %v, nr: %v\n", p.Conn.RemoteAddr(), i, msgbuf.Len(), nr)
 
 		if msgbuf.Len() >= 4 && msgbuf.Len() >= explen {
 			// Handle-Msg
-			fmt.Printf("%v - %v__ Final", p.Conn.RemoteAddr(), i)
+			// fmt.Printf("%v - %v__ Final", p.Conn.RemoteAddr(), i)
 			// fmt.Printf("Fuck!!!!!\n %v\n", msgbuf.Bytes()[explen:msgbuf.Len()])
 			// p.handleMessages(msgbuf.Bytes())
-			p.handleMessages(msgbuf.Bytes()[:explen])
+			p.handleMessages(msgbuf.Bytes())
 			msgbuf.Reset()
+			explen = 0
 		}
 
 		i++
@@ -253,8 +255,11 @@ func (p *Peer) handleMessages(b []byte) {
 		logrus.Infof("request\n")
 	case uint8(7):
 		logrus.Infof("piece\n")
-		logrus.Infof("%v - length: %v\n", p.Conn.RemoteAddr(), length)
-		// p.handlePiece(payload)
+		// logrus.Infof("%v - length: %v\n", p.Conn.RemoteAddr(), length)
+		err := p.HandleBlock(payload)
+		if err != nil {
+			logrus.Errorf("lol - %v\n", err)
+		}
 	case uint8(8):
 		logrus.Infof("cancel\n")
 	case uint8(9):
@@ -329,7 +334,21 @@ func (p *Peer) HandleBlock(payload []byte) error {
 
 	blkidx := begin / torrent.BlockLength
 
-	fmt.Printf("Piece Index - %v\nBlock Index - %v\nBegin - %v\nData - %v\n", pieceidx, blkidx, begin, data)
+	if pieceidx >= len(Torr.Pieces) || blkidx >= len(Torr.Pieces[pieceidx].Blocks) {
+		return fmt.Errorf("lol error 1")
+	}
+
+	block := Torr.Pieces[pieceidx].Blocks[blkidx]
+
+	if !p.Waiting || p.LastRequested != block {
+		fmt.Printf("p.Wait: %v, p.LastReq %v, block:  %v\n", p.Waiting, p.LastRequested, block)
+		return fmt.Errorf("lol error 2")
+	}
+
+	p.Waiting = false
+	p.LastRequested = nil
+
+	logrus.Infof("Piece Index - %v\nBlock Index - %v\nBegin - %v\nData - %v\n", pieceidx, blkidx, begin, data)
 
 	return nil
 }
@@ -348,6 +367,9 @@ func (p *Peer) RequestBlock(blk *Block) error {
 		// logrus.Warnf("couldn't write request message, %v\n", err)
 		return err
 	}
+
+	p.Waiting = true
+	p.LastRequested = blk
 
 	blk.Status = BlockRequested
 

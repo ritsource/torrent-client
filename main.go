@@ -45,15 +45,15 @@ func main() {
 
 	logrus.Errorf("Downloading..\n")
 
-	go func() {
-		for {
-			time.Sleep(5 * time.Second)
-			fmt.Printf("\n\n")
-			for _, s := range seeders {
-				fmt.Printf("%v:%v\n", s.IP, s.Port)
-			}
-		}
-	}()
+	// go func() {
+	// 	for {
+	// 		time.Sleep(5 * time.Second)
+	// 		fmt.Printf("\n\n")
+	// 		for _, s := range seeders {
+	// 			fmt.Printf("%v:%v\n", s.IP, s.Port)
+	// 		}
+	// 	}
+	// }()
 
 	// return
 
@@ -63,6 +63,8 @@ func main() {
 	piececoverage := 0 // how many seeders has been checked for a piece
 
 	for {
+
+		time.Sleep(4 * 500 * time.Millisecond)
 
 		if piececoverage >= len(seeders) {
 			pieceidx++
@@ -89,6 +91,7 @@ func main() {
 
 			if block.Status == src.BlockExist || block.Status == src.BlockFailed {
 				seeder.RequestBlock(block)
+				fmt.Printf("Requested --> %v:%v -- PieceIdx: %v -- BlockIdx: %v\n", seeder.IP, seeder.Port, pieceidx, blockidx)
 				// bRequested = append(bRequested, blockidx)
 				// i++
 			}
