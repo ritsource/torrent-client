@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"reflect"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/ritwik310/torrent-client-xx/torrent"
@@ -44,15 +44,6 @@ const (
 	PeerDisconnected  = int8(3)
 )
 
-// Disconnect .
-func (p *Peer) Disconnect() {
-	p.State = PeerDisconnected
-	p.UnChoked = false
-	if p.Conn != nil {
-		p.Conn.Close()
-	}
-}
-
 /*
 Peer represents a single peer
 */
@@ -62,46 +53,66 @@ type Peer struct {
 	Conn     net.Conn
 	Bitfield []bool
 	UnChoked bool
-	Waiting  bool
 	State    int8
+	Waiting  bool
+}
+
+// IsReady .
+func (p *Peer) IsReady() bool {
+	return p.UnChoked && len(p.Bitfield) > 0 && p.State < PeerDisconnected
+}
+
+// IsAlive .
+func (p *Peer) IsAlive() bool {
+	return !(p.Conn == nil || p.State == PeerDisconnected)
+}
+
+// Disconnect .
+func (p *Peer) Disconnect() {
+	p.State = PeerDisconnected
+	p.UnChoked = false
+	if p.Conn != nil {
+		p.Conn.Close()
+	}
 }
 
 // Ping establishes a tcp connection with the peer and handshake request and reads response too to the peer and starts reqding
-func (p *Peer) Ping(wg *sync.WaitGroup) {
+func (p *Peer) Ping() error {
 	addr := p.IP.String() + ":" + strconv.Itoa(int(p.Port))
 
-	// checking for timeout
-	go func(p *Peer) {
-		time.Sleep(50 * time.Second)
-		if p.State != PeerBitfieldReady || !p.UnChoked {
-			p.Disconnect()
-		}
-	}(p)
+	// // checking for timeout
+	// go func(p *Peer) {
+	// 	time.Sleep(50 * time.Second)
+	// 	fmt.Printf("Timeout!\n%v : state %v : unchoked %v\n", p.State < PeerBitfieldReady || !p.UnChoked, p.State, p.UnChoked)
+	// 	if p.State < PeerBitfieldReady || !p.UnChoked {
+	// 		p.Disconnect()
+	// 	}
+	// }(p)
 
 	var err error
 	p.Conn, err = net.Dial("tcp", addr)
 	if err != nil {
 		logrus.Errorf("%+v\n", err)
-		return
+		return err
 	}
 
 	hsbuf, err := hsMsgBuf()
 	if err != nil {
 		logrus.Warnf("couldn't build the handshake buffer, %v\n", err)
-		return
+		return err
 	}
 
 	_, err = p.Conn.Write(hsbuf.Bytes())
 	if err != nil {
 		logrus.Warnf("couldn't write handshake request, %v\n", err)
-		return
+		return err
 	}
 
 	err = p.readHsMsg(10)
 	if err != nil {
 		logrus.Warnf("unable to read handshake response, %v\n", err)
 		p.Conn.Close()
-		return
+		return err
 	}
 
 	// defer p.Conn.Close()
@@ -110,19 +121,20 @@ func (p *Peer) Ping(wg *sync.WaitGroup) {
 
 	go p.Read()
 
+	i := 0
 	for {
 		time.Sleep(5 * time.Second)
-		pingdone := p.UnChoked && p.State >= PeerBitfieldReady
+		i++
 
-		// fmt.Println("pingdone - ", pingdone)
-		if pingdone || p.State == PeerDisconnected {
-			fmt.Printf("Break - pingdone -> %v : p.State -> %v\n", pingdone, p.State)
-			break
+		if p.IsReady() {
+			return nil
+		} else if !p.IsAlive() {
+			return fmt.Errorf("peer disconnected")
+		} else if i >= 10 {
+			p.Disconnect()
+			return fmt.Errorf("peer timeout")
 		}
-
 	}
-
-	defer wg.Done()
 
 }
 
@@ -156,10 +168,16 @@ func (p *Peer) Read() {
 	msgbuf := new(bytes.Buffer)
 	var explen int
 
-	for p.State < PeerDisconnected {
+	for p.IsAlive() {
 		d := make([]byte, 1024)
 		nr, err := p.Conn.Read(d)
-		if err != nil {
+		switch err {
+		case nil:
+			// pass
+		case io.EOF:
+			p.Disconnect()
+			break
+		default:
 			logrus.Warnf("%v\n", err)
 			break
 		}
@@ -174,19 +192,23 @@ func (p *Peer) Read() {
 
 		if msgbuf.Len() == 0 {
 			explen = int(binary.BigEndian.Uint32(b[:4])) + 4
+			fmt.Printf("%v - %v__ explen: %v, nr: %v\n", p.Conn.RemoteAddr(), i, explen, nr)
 		}
 
 		msgbuf.Write(d[:nr])
+		fmt.Printf("%v - %v__ buflen: %v, nr: %v\n", p.Conn.RemoteAddr(), i, msgbuf.Len(), nr)
 
 		if msgbuf.Len() >= 4 && msgbuf.Len() >= explen {
 			// Handle-Msg
-			p.handleMessages(msgbuf.Bytes())
+			fmt.Printf("%v - %v__ Final", p.Conn.RemoteAddr(), i)
+			// fmt.Printf("Fuck!!!!!\n %v\n", msgbuf.Bytes()[explen:msgbuf.Len()])
+			// p.handleMessages(msgbuf.Bytes())
+			p.handleMessages(msgbuf.Bytes()[:explen])
 			msgbuf.Reset()
-			i++
 		}
 
+		i++
 	}
-
 }
 
 // handleMessages . identify
@@ -231,6 +253,7 @@ func (p *Peer) handleMessages(b []byte) {
 		logrus.Infof("request\n")
 	case uint8(7):
 		logrus.Infof("piece\n")
+		logrus.Infof("%v - length: %v\n", p.Conn.RemoteAddr(), length)
 		// p.handlePiece(payload)
 	case uint8(8):
 		logrus.Infof("cancel\n")

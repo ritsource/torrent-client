@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
-	"sync"
+	"time"
 
 	"github.com/ritwik310/torrent-client/src"
 	"github.com/sirupsen/logrus"
@@ -31,24 +31,40 @@ func main() {
 		piece.GenBlocks()
 	}
 
-	seeders := forceStart(peers)
-	if err != nil {
-		logrus.Panicf("%v\n", err)
+	seeders := Seeders{}
+	seeders.Find(peers)
+
+	i := 0
+	for len(seeders) < 1 {
+		time.Sleep(2 * time.Second)
+		if i >= 10*5/2 {
+			logrus.Panicf("Stalled, no seeders found!")
+			break
+		}
 	}
 
-	for _, s := range seeders {
-		fmt.Printf("%v:%v\n", s.IP, s.Port)
-	}
+	logrus.Errorf("Downloading..\n")
 
-	return
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+			fmt.Printf("\n\n")
+			for _, s := range seeders {
+				fmt.Printf("%v:%v\n", s.IP, s.Port)
+			}
+		}
+	}()
+
+	// return
 
 	pieceidx := 0
 	blockidx := 0
-	peeridx := 0
-	piececoverage := 0 // how many peers has been checked for a piece
+	seederidx := 0
+	piececoverage := 0 // how many seeders has been checked for a piece
 
 	for {
-		if piececoverage >= len(peers) {
+
+		if piececoverage >= len(seeders) {
 			pieceidx++
 		}
 
@@ -57,22 +73,22 @@ func main() {
 			pieceidx = 0
 		}
 
-		if peeridx == len(peers) {
-			peeridx = 0
+		if seederidx >= len(seeders)-1 {
+			seederidx = 0
 		}
 
 		piece := src.Torr.Pieces[pieceidx]
 		block := piece.Blocks[blockidx]
-		peer := peers[peeridx]
+		seeder := seeders[seederidx]
 
-		if !peer.Waiting {
-			peeridx++
+		if !seeder.Waiting {
+			seederidx++
 		}
 
-		if peer.Bitfield[pieceidx] || !peer.Waiting {
+		if seeder.Bitfield[pieceidx] || !seeder.Waiting {
 
 			if block.Status == src.BlockExist || block.Status == src.BlockFailed {
-				peer.RequestBlock(block)
+				seeder.RequestBlock(block)
 				// bRequested = append(bRequested, blockidx)
 				// i++
 			}
@@ -85,35 +101,30 @@ func main() {
 				blockidx = 0
 			}
 
-			peeridx++
+			seederidx++
 		} else {
 			piececoverage++
-			peeridx++
+			seederidx++
 		}
 	}
 }
 
+// type
+
+// Seeders .
+type Seeders []*src.Peer
+
 /*
-forceStart is gonna disconnect with all the peers
+Find is gonna disconnect with all the peers
 and reestablish connection with all of them again
 */
-func forceStart(peers []*src.Peer) []*src.Peer {
-	seeders := []*src.Peer{}
-
-	var wg sync.WaitGroup
-
+func (sdrs *Seeders) Find(peers []*src.Peer) {
 	for _, p := range peers {
-		go p.Ping(&wg)
-		wg.Add(1)
+		go func(p *src.Peer) {
+			err := p.Ping()
+			if err == nil {
+				*sdrs = append(*sdrs, p)
+			}
+		}(p)
 	}
-
-	wg.Wait()
-
-	for _, p := range peers {
-		if p.UnChoked && p.State == src.PeerBitfieldReady {
-			seeders = append(seeders, p)
-		}
-	}
-
-	return seeders
 }
