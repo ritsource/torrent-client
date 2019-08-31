@@ -15,7 +15,7 @@ import (
 )
 
 // RequestPeerNum ...
-var RequestPeerNum = 20
+var RequestPeerNum = 40
 
 // GetPeers returns the peers
 func GetPeers() ([]*Peer, error) {

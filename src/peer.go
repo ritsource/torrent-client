@@ -322,6 +322,9 @@ func (p *Peer) HandleBitfield(payload []byte) {
 
 }
 
+var Requested = 0
+var Recieved = 0
+
 // HandleBlock .
 func (p *Peer) HandleBlock(payload []byte) error {
 	if len(payload) < 8+1 {
@@ -340,6 +343,8 @@ func (p *Peer) HandleBlock(payload []byte) error {
 
 	block := Torr.Pieces[pieceidx].Blocks[blkidx]
 
+	Recieved++
+
 	if !p.Waiting || p.LastRequested != block {
 		fmt.Printf("p.Wait: %v, p.LastReq %v, block:  %v\n", p.Waiting, p.LastRequested, block)
 		return fmt.Errorf("lol error 2")
@@ -347,14 +352,19 @@ func (p *Peer) HandleBlock(payload []byte) error {
 
 	p.Waiting = false
 	p.LastRequested = nil
+	block.Status = BlockDownloaded
 
-	logrus.Infof("Piece Index - %v\nBlock Index - %v\nBegin - %v\nData - %v\n", pieceidx, blkidx, begin, data)
+	logrus.Infof("Piece Index - %v\nBlock Index - %v\nBegin - %v\nData - bytes %v\n", pieceidx, blkidx, begin, len(data))
 
 	return nil
 }
 
 // RequestBlock .
 func (p *Peer) RequestBlock(blk *Block) error {
+	p.Waiting = true
+	p.LastRequested = blk
+	blk.Status = BlockRequested
+
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, uint32(13))
 	binary.Write(buf, binary.BigEndian, uint8(6))       // id - request message
@@ -362,16 +372,17 @@ func (p *Peer) RequestBlock(blk *Block) error {
 	binary.Write(buf, binary.BigEndian, blk.Begin)      //
 	binary.Write(buf, binary.BigEndian, blk.Length)
 
+	Requested++
+
 	_, err := p.Conn.Write(buf.Bytes())
 	if err != nil {
 		// logrus.Warnf("couldn't write request message, %v\n", err)
+		p.Waiting = false
+		p.LastRequested = nil
+		blk.Status = BlockFailed
+		Requested--
 		return err
 	}
-
-	p.Waiting = true
-	p.LastRequested = blk
-
-	blk.Status = BlockRequested
 
 	return nil
 }

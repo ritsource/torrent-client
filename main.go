@@ -35,7 +35,7 @@ func main() {
 	seeders.Find(peers)
 
 	i := 0
-	for len(seeders) < 1 {
+	for seeders.Len() < 1 {
 		time.Sleep(2 * time.Second)
 		if i >= 10*5/2 {
 			logrus.Panicf("Stalled, no seeders found!")
@@ -45,71 +45,19 @@ func main() {
 
 	logrus.Errorf("Downloading..\n")
 
-	// go func() {
-	// 	for {
-	// 		time.Sleep(5 * time.Second)
-	// 		fmt.Printf("\n\n")
-	// 		for _, s := range seeders {
-	// 			fmt.Printf("%v:%v\n", s.IP, s.Port)
-	// 		}
-	// 	}
-	// }()
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+			fmt.Printf("\n\n")
+			// for _, s := range seeders {
+			// 	fmt.Printf("%v:%v\n", s.IP, s.Port)
+			// }
 
-	// return
-
-	pieceidx := 0
-	blockidx := 0
-	seederidx := 0
-	piececoverage := 0 // how many seeders has been checked for a piece
-
-	for {
-
-		time.Sleep(4 * 500 * time.Millisecond)
-
-		if piececoverage >= len(seeders) {
-			pieceidx++
+			fmt.Printf("***** Requested: %v\n***** Recieved %v\n", src.Requested, src.Recieved)
 		}
+	}()
 
-		if pieceidx == len(src.Torr.Pieces)-1 {
-			blockidx = 0
-			pieceidx = 0
-		}
-
-		if seederidx >= len(seeders)-1 {
-			seederidx = 0
-		}
-
-		piece := src.Torr.Pieces[pieceidx]
-		block := piece.Blocks[blockidx]
-		seeder := seeders[seederidx]
-
-		if !seeder.Waiting {
-			seederidx++
-		}
-
-		if seeder.Bitfield[pieceidx] || !seeder.Waiting {
-
-			if block.Status == src.BlockExist || block.Status == src.BlockFailed {
-				seeder.RequestBlock(block)
-				fmt.Printf("Requested --> %v:%v -- PieceIdx: %v -- BlockIdx: %v\n", seeder.IP, seeder.Port, pieceidx, blockidx)
-				// bRequested = append(bRequested, blockidx)
-				// i++
-			}
-
-			blockidx++
-
-			if blockidx == len(piece.Blocks) {
-				pieceidx++
-				piececoverage = 0
-				blockidx = 0
-			}
-
-			seederidx++
-		} else {
-			piececoverage++
-			seederidx++
-		}
-	}
+	seeders.Download(src.Torr)
 }
 
 // type
@@ -117,17 +65,90 @@ func main() {
 // Seeders .
 type Seeders []*src.Peer
 
+// Len .
+func (sds *Seeders) Len() int {
+	return len(*sds)
+}
+
 /*
 Find is gonna disconnect with all the peers
 and reestablish connection with all of them again
 */
-func (sdrs *Seeders) Find(peers []*src.Peer) {
+func (sds *Seeders) Find(peers []*src.Peer) {
 	for _, p := range peers {
 		go func(p *src.Peer) {
 			err := p.Ping()
 			if err == nil {
-				*sdrs = append(*sdrs, p)
+				(*sds) = append(*sds, p)
 			}
 		}(p)
+	}
+}
+
+// Download .
+func (sds *Seeders) Download(torr *src.Torrent) {
+	pidx := 0
+	bidx := 0
+	sidx := 0
+	pcover := 0
+	i := 0
+
+	for {
+		i++
+
+		time.Sleep(400 * time.Microsecond)
+
+		// if piece of `pidx` is not found on any of the
+		// seeders, increment `pidx` and reset `pcover`
+		if pcover >= sds.Len() {
+			pidx++
+			pcover = 0
+		}
+
+		// if all pieces are covered (or, `pidx` is greater
+		// than last piece index), reset `pidx` and `bidx`
+		if pidx == len(torr.Pieces)-1 {
+			bidx = 0
+			pidx = 0
+		}
+
+		// if all seeds are covered reset `sidx` to start/0
+		if sidx >= sds.Len() {
+			sidx = 0
+		}
+
+		// variables pointing to the data
+		piece := torr.Pieces[pidx]
+
+		if bidx == len(piece.Blocks) {
+			bidx = 0
+			pidx++
+			pcover = 0
+			continue
+		}
+
+		block := piece.Blocks[bidx]
+		seeder := (*sds)[sidx]
+
+		// fmt.Printf("sds - %v\n", seeder)
+
+		// if seeder is not free to request piece
+		if sds != nil && seeder.Waiting && !seeder.Bitfield[pidx] {
+			sidx++
+			pcover++
+			continue
+		}
+
+		if block.Status == src.BlockRequested || block.Status == src.BlockDownloaded {
+			bidx++
+			continue
+		}
+
+		fmt.Println(i)
+		seeder.RequestBlock(block)
+		fmt.Printf("REQ - PIDX: %v | BIDX: %v | SEED: %v:%v\n", pidx, bidx, seeder.IP, seeder.Port)
+		sidx++
+
+		// Download(torr, pidx, )
 	}
 }
