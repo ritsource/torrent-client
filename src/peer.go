@@ -3,12 +3,15 @@ package src
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
 	"net"
+	"os"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ritwik310/torrent-client-xx/torrent"
@@ -31,6 +34,13 @@ type PeersStatus struct {
 	Total     int
 	Connected int
 }
+
+/*
+MaxMessageLength is the maximum p2p message length (happens to be a piece message)
+if longer message recieved from a peer (ignore the message and disconnect the peer)
+Msg-Length [4 bytes] + MsgID [1 byte] + Piece-Index [4 bytes] + Begin [4 bytes] + Length-of-Block [16384 bytes]
+*/
+var MaxMessageLength = 4 + 1 + 4 + 4 + LengthOfBlock
 
 /*Enum values for Peer state
 PeerNone - Is the default state (at start)
@@ -77,6 +87,18 @@ func (p *Peer) Disconnect() {
 	}
 }
 
+// Reset .
+func (p *Peer) Reset() {
+	p.State = PeerNone
+	p.Bitfield = []bool{}
+	p.UnChoked = false
+	p.Waiting = false
+	p.LastRequested = nil
+	if p.Conn != nil {
+		p.Conn.Close()
+	}
+}
+
 // Ping establishes a tcp connection with the peer and handshake request and reads response too to the peer and starts reqding
 func (p *Peer) Ping() error {
 	addr := p.IP.String() + ":" + strconv.Itoa(int(p.Port))
@@ -84,31 +106,36 @@ func (p *Peer) Ping() error {
 	var err error
 	p.Conn, err = net.Dial("tcp", addr)
 	if err != nil {
-		logrus.Errorf("%+v\n", err)
+		logrus.Warnf("couldn't establish TCP connection, %+v | %v:%v\n", err, p.IP, p.Port)
 		return err
 	}
 
 	hsbuf, err := hsMsgBuf()
 	if err != nil {
-		logrus.Warnf("couldn't build the handshake buffer, %v\n", err)
+		logrus.Warnf("couldn't build the handshake buffer, %v | %v:%v\n", err, p.IP, p.Port)
 		return err
 	}
 
 	_, err = p.Conn.Write(hsbuf.Bytes())
 	if err != nil {
-		logrus.Warnf("couldn't write handshake request, %v\n", err)
+		logrus.Warnf("couldn't write handshake request, %v | %v:%v\n", err, p.IP, p.Port)
 		return err
 	}
 
-	err = p.readHsMsg(10)
+	d := make([]byte, 1024)
+	nr, err := p.Conn.Read(d)
 	if err != nil {
-		logrus.Warnf("unable to read handshake response, %v\n", err)
-		p.Conn.Close()
+		logrus.Warnf("couldn't to read handshake response, %v | %v:%v\n", err, p.IP, p.Port)
+		p.Disconnect()
 		return err
 	}
 
-	// defer p.Conn.Close()
+	if !isHsMsg(d[:nr]) {
+		logrus.Warnf("invalid handshake message, disconnecting.. | %v:%v\n", p.IP, p.Port)
+		p.Disconnect()
+	}
 
+	logrus.Infof("handshake successfully established | %v:%v\n", p.IP, p.Port)
 	p.State = PeerHandshaked
 
 	go p.Read()
@@ -121,167 +148,14 @@ func (p *Peer) Ping() error {
 		if p.IsReady() {
 			return nil
 		} else if !p.IsAlive() {
+			logrus.Infof("peer has been disconnected | %v:%v\n", p.IP, p.Port)
 			return fmt.Errorf("peer disconnected")
 		} else if i >= 10 {
+			logrus.Infof("peer handshake timeout, disconnecting.. | %v:%v\n", p.IP, p.Port)
 			p.Disconnect()
 			return fmt.Errorf("peer timeout")
 		}
 	}
-
-}
-
-// readHsMsg .
-func (p *Peer) readHsMsg(lim int) error {
-	if lim == 0 {
-		return fmt.Errorf("message read timeout")
-	}
-
-	if lim < 10 {
-		fmt.Printf("\n\n\n\n\n\n*******haha - it was a good option*******\n\n\n\n\n\n")
-	}
-
-	d := make([]byte, 1024)
-	nr, err := p.Conn.Read(d)
-	if err != nil {
-		logrus.Warnf("%+v\n", err)
-		return err
-	}
-
-	if isHsMsg(d[:nr]) {
-		logrus.Infof("message recieved: handshake - %v\n", p.Conn.RemoteAddr())
-		return nil
-	}
-
-	return p.readHsMsg(lim - 1)
-}
-
-func (p *Peer) Read() {
-	i := 0
-	msgbuf := new(bytes.Buffer)
-	var explen int
-
-	for p.IsAlive() {
-		d := make([]byte, 1024)
-		nr, err := p.Conn.Read(d)
-		switch err {
-		case nil:
-			// pass
-		case io.EOF:
-			p.Disconnect()
-			break
-		default:
-			logrus.Warnf("%v\n", err)
-			break
-		}
-
-		b := d[:nr]
-
-		if nr < 4+1 {
-			// invalid
-			// logrus.Warnf("message recieved: invalid - %v - msg-length () < 4+1", conn.RemoteAddr())
-			continue
-		}
-
-		// if msgbuf.Len() >  {
-
-		// }
-
-		if msgbuf.Len() == 0 {
-			explen = int(binary.BigEndian.Uint32(b[:4])) + 4
-			// fmt.Printf("%v - %v__ explen: %v, nr: %v\n", p.Conn.RemoteAddr(), i, explen, nr)
-		}
-
-		if explen > LengthOfBlock+500 {
-			fmt.Printf("x Disconnect - %v _____________ Explen: %v Block: %v\n", p.Conn.RemoteAddr(), explen, LengthOfBlock)
-			p.Disconnect()
-			break
-		}
-
-		msgbuf.Write(d[:nr])
-
-		if msgbuf.Len() >= 4 && msgbuf.Len() >= explen {
-			// Handle-Msg
-			// fmt.Printf("%v - %v__ Final", p.Conn.RemoteAddr(), i)
-			// fmt.Printf("Fuck!!!!!\n %v\n", msgbuf.Bytes()[explen:msgbuf.Len()])
-			// p.handleMessages(msgbuf.Bytes())
-			p.handleMessages(msgbuf.Bytes())
-			msgbuf.Reset()
-			explen = 0
-		}
-
-		i++
-	}
-}
-
-// handleMessages . identify
-func (p *Peer) handleMessages(b []byte) {
-
-	if len(b) < 4+1 {
-		logrus.Warnf("invalid message: %v bytes from %v", len(b), p.Conn.RemoteAddr())
-		return
-	}
-	length := binary.BigEndian.Uint32(b[:4])
-
-	if len(b) < int(length)+4 || length == 0 {
-		logrus.Warnf("invalid message: %v bytes from %v", len(b), p.Conn.RemoteAddr())
-		return
-	}
-	id := b[4]
-
-	var payload []byte
-	if len(b) > 5 {
-		payload = b[5:]
-	}
-
-	logrus.Infof("message received: %v bytes from %v", len(b), p.Conn.RemoteAddr())
-
-	switch id {
-	case uint8(0):
-		logrus.Infof("choke\n")
-		p.Disconnect()
-	case uint8(1):
-		logrus.Infof("unchoke\n")
-		p.UnChoked = true
-	case uint8(2):
-		logrus.Infof("interested\n")
-	case uint8(3):
-		logrus.Infof("not interested\n")
-	case uint8(4):
-		logrus.Infof("have\n")
-	case uint8(5):
-		logrus.Infof("-> bitfield\n")
-		p.HandleBitfield(payload)
-	case uint8(6):
-		logrus.Infof("request\n")
-	case uint8(7):
-		logrus.Infof("piece\n")
-		// logrus.Infof("%v - length: %v\n", p.Conn.RemoteAddr(), length)
-		err := p.HandleBlock(payload)
-		if err != nil {
-			logrus.Errorf("lol - %v\n", err)
-		}
-	case uint8(8):
-		logrus.Infof("cancel\n")
-	case uint8(9):
-		logrus.Infof("port\n")
-	}
-
-}
-
-func (p *Peer) handleMsg(buf *bytes.Buffer) {
-	b := buf.Bytes()
-
-	if isHsMsg(b) {
-		logrus.Infof("message recieved: handshake - %v\n", p.Conn.RemoteAddr())
-		return
-	}
-
-	// if len(b) < 4+1 {
-	// 	logrus.Errorf("message recieved: invalid - %v - msg-length < 4+1", conn.RemoteAddr())
-	// 	return
-	// }
-
-	logrus.Infof("message recieved: %v - %v\n", len(b), p.Conn.RemoteAddr())
 
 }
 
@@ -299,6 +173,93 @@ func hsMsgBuf() (*bytes.Buffer, error) {
 
 func isHsMsg(b []byte) bool {
 	return len(b) >= 20 && reflect.DeepEqual(b[1:20], PeerProtocolName)
+}
+
+// Read .
+func (p *Peer) Read() {
+	var length int
+	msgbuf := new(bytes.Buffer)
+
+	for p.IsAlive() {
+		d := make([]byte, MaxMessageLength)
+		nr, err := p.Conn.Read(d)
+		switch err {
+		case nil:
+			// pass
+		case io.EOF:
+			p.Disconnect()
+			break
+		default:
+			logrus.Warnf("%v\n", err)
+			break
+		}
+
+		b := d[:nr]
+
+		if nr < 4+1 {
+			continue
+		}
+
+		if msgbuf.Len() == 0 {
+			length = int(binary.BigEndian.Uint32(b[:4]))
+		}
+
+		if length+4 > MaxMessageLength {
+			logrus.Warnf("invalid message, msg-length = %v bytes, disconnecting.. | %v:%v\n", length, len(b), p.IP, p.Port)
+			p.Disconnect()
+			break
+		}
+
+		msgbuf.Write(d[:nr])
+
+		if msgbuf.Len() == length+4 {
+			p.handleMessages(msgbuf.Bytes(), length)
+			msgbuf.Reset()
+			length = 0
+		}
+
+	}
+}
+
+// handleMessages . identify
+func (p *Peer) handleMessages(b []byte, length int) {
+	id := b[4]
+
+	var payload []byte
+	if len(b) > 5 {
+		payload = b[5:]
+	}
+
+	switch id {
+	case uint8(0):
+		logrus.Infof("CHOKE message, %v bytes | %v:%v\n", length, p.IP, p.Port)
+		p.Disconnect()
+	case uint8(1):
+		logrus.Infof("UNCHOKE message, %v bytes | %v:%v\n", length, p.IP, p.Port)
+		p.UnChoked = true
+	case uint8(2):
+		logrus.Infof("INTERESTED message, %v bytes | %v:%v\n", length, p.IP, p.Port)
+	case uint8(3):
+		logrus.Infof("NOT-INTERESTED message, %v bytes | %v:%v\n", length, p.IP, p.Port)
+	case uint8(4):
+		logrus.Infof("HAVE message, %v bytes | %v:%v\n", length, p.IP, p.Port)
+	case uint8(5):
+		logrus.Infof("BITFIELD message, %v bytes | %v:%v\n", length, p.IP, p.Port)
+		p.HandleBitfield(payload)
+	case uint8(6):
+		logrus.Infof("REQUEST message, %v bytes | %v:%v\n", length, p.IP, p.Port)
+	case uint8(7):
+		logrus.Infof("PIECE message, %v bytes | %v:%v\n", length, p.IP, p.Port)
+		err := p.HandleBlock(payload, int(length)-9)
+		if err != nil {
+			logrus.Errorf("lol - %v\n", err)
+		}
+	case uint8(8):
+		logrus.Infof("CANCEL message, %v bytes | %v:%v\n", length, p.IP, p.Port)
+	case uint8(9):
+		logrus.Infof("PORT message, %v bytes | %v:%v\n", length, p.IP, p.Port)
+	}
+
 }
 
 // HandleBitfield ..
@@ -326,14 +287,16 @@ var Requested = 0
 var Recieved = 0
 
 // HandleBlock .
-func (p *Peer) HandleBlock(payload []byte) error {
+func (p *Peer) HandleBlock(payload []byte, blklen int) error {
 	if len(payload) < 8+1 {
 		return fmt.Errorf("invalid data, payload length is %v < 9", len(payload))
 	}
 
 	pieceidx := int(binary.BigEndian.Uint32(payload[:4])) // piece index
 	begin := int(binary.BigEndian.Uint32(payload[4:8]))
-	data := payload[8:]
+	data := payload[8 : 8+blklen]
+
+	fmt.Println("-----> data", len(data))
 
 	blkidx := begin / torrent.BlockLength
 
@@ -354,10 +317,31 @@ func (p *Peer) HandleBlock(payload []byte) error {
 	p.LastRequested = nil
 	block.Status = BlockDownloaded
 
-	logrus.Infof("Piece Index - %v\nBlock Index - %v\nBegin - %v\nData - bytes %v\n", pieceidx, blkidx, begin, len(data))
+	logrus.Infof("PMSG (%v-bytes payload) - pidx=%v, bidx=%v, begin=%v, block=%v-bytes\n", len(payload), pieceidx, blkidx, begin, len(data))
+
+	fname := Torr.Files[0].Path
+
+	f, err := os.OpenFile(fname, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+	// f, err := os.Open(fname)
+	if err != nil {
+		logrus.Errorf("%v\n", err)
+	}
+	defer f.Close()
+
+	actbgn := pieceidx*int(Torr.PieceLen) + begin // actual file begin
+
+	_, err = f.WriteAt(data, int64(actbgn))
+	if err != nil {
+		logrus.Errorf("%v\n", err)
+	}
 
 	return nil
 }
+
+var (
+	// ErrDisconnected .
+	ErrDisconnected = errors.New("peer connection has been closed")
+)
 
 // RequestBlock .
 func (p *Peer) RequestBlock(blk *Block) error {
@@ -376,13 +360,19 @@ func (p *Peer) RequestBlock(blk *Block) error {
 
 	_, err := p.Conn.Write(buf.Bytes())
 	if err != nil {
-		// logrus.Warnf("couldn't write request message, %v\n", err)
+		logrus.Warnf("boy! -- couldn't write request message, %v\n", err)
 		p.Waiting = false
 		p.LastRequested = nil
 		blk.Status = BlockFailed
 		Requested--
-		return err
+
+		if strings.Contains(err.Error(), "use of closed network connection") {
+			fmt.Println("Holy-crap", err.Error(), "use of closed network connection")
+			return ErrDisconnected
+		}
 	}
 
-	return nil
+	fmt.Printf("HERE! \"%v\" %v:%v\n", err, p.IP, p.Port)
+
+	return err
 }
