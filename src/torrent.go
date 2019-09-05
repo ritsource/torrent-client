@@ -1,7 +1,8 @@
 package src
 
 import (
-	"crypto/sha1"
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"net/url"
@@ -53,10 +54,65 @@ type File struct {
 
 // Piece represents an individual piece of data
 type Piece struct {
-	Index  uint32   // piece-index
-	Hash   []byte   // 20-byte long SHA1-hash of the piece-data, extracted from `.torrent` file
-	Length uint32   //  size of piece
-	Blocks []*Block // blocks
+	Index      uint32   // piece-index
+	Hash       []byte   // 20-byte long SHA1-hash of the piece-data, extracted from `.torrent` file
+	Length     uint32   //  size of piece
+	Blocks     []*Block // blocks
+	Status     uint8
+	Downloaded bool
+}
+
+// WriteToFiles .
+func (p *Piece) WriteToFiles(data []byte) error {
+	fpth := Torr.Files[0].Path
+
+	// TODO: only single file for now
+	// if !fileExist(fpth) {
+	// 	panic("file doesn't exist")
+	// 	// it will be created beforehand fo rnow
+	// }
+
+	f, err := os.OpenFile(fpth, os.O_RDWR, os.ModeAppend)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	off := int64(p.Index * Torr.PieceLen)
+
+	nw, err := f.WriteAt(data, off)
+	if err != nil {
+		return fmt.Errorf("%v", err)
+	}
+
+	fmt.Printf("DATA: %+v\nPIDX=%v\n", data[:40], p.Index)
+
+	fmt.Printf("WRITTEN: %+v bytes, offset %v to %v\n", nw, off, int(off)+nw)
+
+	p.Downloaded = true
+
+	// // fmt.Printf
+	// b, err := ioutil.ReadFile(Torr.Files[0].Path)
+	// if err != nil {
+	// 	logrus.Warnf("read error, %v\n", err)
+	// }
+
+	b := make([]byte, nw)
+	_, err = f.ReadAt(b, off)
+	if err != nil {
+		logrus.Warnf("%+v\n", err)
+	}
+
+	fmt.Printf("FILE: chunk length=%v\n", len(b))
+	fmt.Printf("FILE: dataf=%v\n", b[:40])
+
+	return nil
+}
+
+// fileExist .
+func fileExist(fpth string) bool {
+	_, err := os.Stat(fpth)
+	return err != nil && os.IsNotExist(err)
 }
 
 // GenBlocks .
@@ -65,7 +121,7 @@ func (p *Piece) GenBlocks() {
 
 	for i := 0; i < n; i++ {
 		var ln int
-		if i == n-1 {
+		if i == n-1 && int(p.Length)%LengthOfBlock != 0 {
 			ln = int(p.Length) % LengthOfBlock
 		} else {
 			ln = LengthOfBlock
@@ -101,6 +157,19 @@ type Block struct {
 	Begin      uint32 // offset where the block starts within the piece (that it's a part of)
 	Length     uint32 // length of the block in bytes
 	Status     uint8  // status of the block - exist (default), requested, downloaded, failed
+	Data       []byte
+}
+
+// requestMsgBuf .
+func (b *Block) requestMsgBuf() (*bytes.Buffer, error) {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.BigEndian, uint32(13))
+	err = binary.Write(buf, binary.BigEndian, uint8(6))     // id - request message
+	err = binary.Write(buf, binary.BigEndian, b.PieceIndex) // piece index
+	err = binary.Write(buf, binary.BigEndian, b.Begin)      //
+	err = binary.Write(buf, binary.BigEndian, b.Length)
+
+	return buf, err
 }
 
 // Constants corrosponding to file-mode enum value of `Torrent`
@@ -135,9 +204,11 @@ func (t *Torrent) Read(dict *map[string]interface{}) error {
 	// calculating infohash, a 20-byte long SHA1 hash of bencode encoded
 	// info value. Every torrent is uniquely identified by its infohash
 	enc := bencode.Encode((*dict)["info"])
-	h := sha1.New()
-	h.Write(enc)
-	t.InfoHash = h.Sum(nil)
+	hash, err := GetSHA1(enc)
+	if err != nil {
+		return err
+	}
+	t.InfoHash = hash
 
 	// converting info into a dictionary (map[string]interface{})
 	info := (*dict)["info"].(map[string]interface{})
@@ -204,8 +275,4 @@ func (t *Torrent) Read(dict *map[string]interface{}) error {
 	return nil
 }
 
-// WriteBlock writes blocks of data recieved from
-// other peers to the appropriate files
-func (t *Torrent) WriteBlock(block *Block) error {
-	return fmt.Errorf("not implemented")
-}
+// func (t *Torrent) WriteToFiles(data []byte, )
