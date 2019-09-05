@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Write a Torrent Client in Go
 
 <!--
@@ -231,3 +232,6 @@ Messaging usually takes place with multiple peers at the same time, to make the 
 
 
 # More to be added...
+=======
+# Torrent Client
+>>>>>>> from_scratch

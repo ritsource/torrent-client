@@ -3,173 +3,162 @@ package main
 import (
 	"fmt"
 	"os"
-	"path"
-	"runtime"
-	"sync"
 	"time"
 
-	"github.com/ritwik310/torrent-client/torrent"
-	"github.com/ritwik310/torrent-client/tracker"
+	"github.com/ritwik310/torrent-client/src"
 	"github.com/sirupsen/logrus"
 )
 
 func main() {
-	// reading command line arguements for torrent file path
+	// reading the `.torrent` file from the command-line arguements
 	if len(os.Args) < 2 {
-		logrus.Errorf("no torrent file provided")
-		return
+		logrus.Panicf("no `.torrent` file provided")
 	}
 	fn := os.Args[1]
 
-	// // reading the torrent file
-	torr, err := torrent.NewTorrent(fn)
+	// reading the `.torrent` file
+	err := src.ReadFile(fn)
 	if err != nil {
 		logrus.Panicf("%v\n", err)
 	}
 
-	// new tracker
-	tracker := tracker.NewTracker(torr)
-
-	torr.File, err = os.Create(path.Join(".", torr.FileName))
+	peers, err := src.GetPeers()
 	if err != nil {
-		logrus.Errorf("%v\n", err)
+		logrus.Panicf("%v\n", err)
 	}
 
-	defer torr.File.Close()
-
-	// fmt.Println("Getting peers")
-	err = tracker.GetPeers()
-	if err != nil {
-		logrus.Panicf("couldn't read peers, %v", err)
+	for _, piece := range src.Torr.Pieces {
+		piece.GenBlocks()
 	}
 
-	// fmt.Println("len(torr.Pieces)", len(torr.Pieces))
-
-	go func() {
-		for {
-			time.Sleep(3 * time.Second)
-			fmt.Println("x-x-x-x")
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-
-			fmt.Printf("\tGo routines -> %v\n", runtime.NumGoroutine())
-			tot := m.TotalAlloc / 1024 / 1024
-			fmt.Printf("\tMemory alloc -> %v MiB\n", tot)
-			fmt.Println("x-x-x-x")
-
-			if tot > 2000 {
-				os.Exit(3)
-			}
-		}
-	}()
-
-	ch := make(chan string)
-
-	go func(t *torrent.Torrent, ch chan string) {
-		for _, p := range t.Pieces {
-			p.Blockize()
-		}
-		ch <- "done"
-	}(torr, ch)
-
-	for i, p := range tracker.Peers {
-		if i > 9 {
-			break
-		}
-		fmt.Printf("%+v\n", p)
-		go p.Start()
-	}
-
-	time.Sleep(20 * time.Second)
-
-	<-ch
-	// for _, piece := range torr.Pieces {
-	// 	fmt.Printf("%+v\n", *piece)
-	// }
-	// var wg sync.WaitGroup
-
-	pieceidx := 0
-	blockidx := 0
-	peeridx := 0
-	piececoverage := 0 // how many peers has been checked for a piece
-
-	// var bRequested []int
-
-	// go func(br *[]int) {
-	// 	for {
-	// 		time.Sleep(3 * time.Second)
-	// 		fmt.Println("------------------->", len(bRequested))
-	// 	}
-	// }(&bRequested)
-
-	var wg sync.WaitGroup
+	seeders := Seeders{}
+	seeders.Find(peers)
 
 	i := 0
-
-	for {
-
-		// if i > 100 {
-		// 	break
-		// }
-
-		time.Sleep(time.Millisecond * 1)
-		// if all peers has been checked and none of them contains
-		// the piece skip that piece by pieceidx++, piececoverage
-		// contains how many peers has been checked for a piece
-		if piececoverage >= len(tracker.Peers) {
-			pieceidx++
+	for seeders.Len() < 1 {
+		time.Sleep(2 * time.Second)
+		if i >= 10*5/2 {
+			logrus.Panicf("Stalled, no seeders found!")
+			break
 		}
-
-		if pieceidx == len(torr.Pieces) {
-			time.Sleep(5 * time.Second)
-			blockidx = 0
-			pieceidx = 0
-		}
-
-		if peeridx == len(tracker.Peers) {
-			peeridx = 0
-		}
-
-		piece := torr.Pieces[pieceidx]
-		block := piece.Blocks[blockidx]
-		peer := tracker.Peers[peeridx]
-
-		if !peer.UnChoked {
-			peeridx++
-			continue
-		}
-
-		if len(peer.Bitfield) >= pieceidx+1 && peer.Bitfield[pieceidx] == 1 {
-
-			if block.Status == torrent.BlockExist || block.Status == torrent.BlockFailed {
-				peer.RequestPiece(block)
-				// bRequested = append(bRequested, blockidx)
-				i++
-			}
-
-			blockidx++
-
-			if blockidx == len(piece.Blocks) {
-				pieceidx++
-				piececoverage = 0
-				blockidx = 0
-			}
-
-			peeridx++
-		} else {
-			piececoverage++
-			peeridx++
-		}
-
 	}
 
-	go func() {
-		for {
-			time.Sleep(1 * time.Second)
-			fmt.Println("Hohahahahhaha")
-		}
-	}()
-	wg.Add(1)
-	wg.Wait()
+	f, err := os.Create(src.Torr.Files[0].Path)
+	if err != nil {
+		logrus.Errorf("%v\n", err)
+		return
+	}
+	f.Close()
 
+	// fmt.Println()
+	logrus.Errorln("Downloadijng.....................................")
+	seeders.Download()
+
+}
+
+// Seeders .
+type Seeders []*src.Peer
+
+// Len .
+func (sdrs *Seeders) Len() int {
+	return len(*sdrs)
+}
+
+// Active .
+func (sdrs *Seeders) Active() int {
+	x := 0
+	for _, s := range *sdrs {
+		if s.IsReady() {
+			x++
+		}
+	}
+	return x
+}
+
+/*
+Find is gonna disconnect with all the peers
+and reestablish connection with all of them again
+*/
+func (sdrs *Seeders) Find(peers []*src.Peer) {
+	for _, p := range peers {
+		go func(p *src.Peer) {
+			err := p.Ping()
+			if err == nil {
+				(*sdrs) = append(*sdrs, p)
+			}
+		}(p)
+	}
+}
+
+// Download .
+func (sdrs *Seeders) Download() {
+	pidx := 0
+	sidx := 0
+	// pcovered := 0
+
+	downloaded := 0
+
+	go func(d *int) {
+		for {
+			time.Sleep(30 * time.Second)
+			fmt.Printf("*******************\n\n Downloaded = %v \n\n*****\n", *d)
+			if *d >= len(src.Torr.Pieces) {
+				break
+			}
+		}
+	}(&downloaded)
+
+	for {
+		time.Sleep(100 * time.Millisecond)
+
+		if pidx >= len(src.Torr.Pieces) {
+			x := false
+			d := 0
+			for _, p := range src.Torr.Pieces {
+				if p.Status == src.BlockDownloaded {
+					d++
+				} else {
+					x = true
+				}
+			}
+
+			if x == false {
+				break
+			}
+
+			downloaded = d
+			pidx = 0
+		}
+
+		if sidx >= len(*sdrs) {
+			sidx = 0
+		}
+
+		piece := src.Torr.Pieces[pidx]
+		piecefree := piece.Status == src.BlockExist || piece.Status == src.BlockFailed
+
+		// fmt.Println(pidx, sidx)
+		if s := (*sdrs)[sidx]; s.IsFree() && s.HasPiece(pidx) && piecefree {
+
+			go func(s *src.Peer, p *src.Piece) {
+				fmt.Printf("requesting %v to %v:%v\n", p.Index, s.IP, s.Port)
+				p.Status = src.BlockRequested
+
+				_, err := s.DownloadPiece(p)
+				if err != nil {
+					p.Status = src.BlockFailed
+					logrus.Errorf("%v\n", err)
+					return
+				}
+
+				p.Status = src.BlockDownloaded
+			}(s, piece)
+
+			pidx++
+
+		}
+
+		sidx++
+
+	}
 }
