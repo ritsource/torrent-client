@@ -49,64 +49,102 @@ func ReadFile(fn string) error {
 // File holds value for every file to be downloaded
 type File struct {
 	Path   string // the path where the file needs to be written
-	Length uint32 // size of the file (in bytes)
+	Start  int
+	Length int // size of the file (in bytes)
 }
+
+// IsExist .
+func (f *File) IsExist() (bool, error) {
+	if _, err := os.Stat(f.Path); err == nil {
+		return true, nil
+	} else if os.IsNotExist(err) {
+		return false, nil
+	} else {
+		return false, err
+	}
+}
+
+// WriteData .
+func (f *File) WriteData(bs []byte, off int) (int, error) {
+	exist, err := f.IsExist()
+	if err != nil {
+		return 0, err
+	}
+
+	var file *os.File
+	if exist {
+		file, err = os.Create(f.Path)
+	} else {
+		file, err = os.Open(f.Path)
+	}
+
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+
+	return file.WriteAt(bs, int64(off))
+}
+
+// Constants corrosponding to `Status` enum value of of `Piece`
+const (
+	PieceStatusDefault    uint8 = 0 // default state, 0 when a piece is created
+	PieceStatusRequested  uint8 = 1 // when the piece have been requested to a peer
+	PieceStatusDownloaded uint8 = 2 // when the piece download has successfully been completed
+	PieceStatusFailed     uint8 = 3 // when the piece download has not been successful (failed atleast once)
+)
 
 // Piece represents an individual piece of data
 type Piece struct {
-	Index      uint32   // piece-index
-	Hash       []byte   // 20-byte long SHA1-hash of the piece-data, extracted from `.torrent` file
-	Length     uint32   //  size of piece
-	Blocks     []*Block // blocks
-	Status     uint8
-	Downloaded bool
+	Index  uint32   // piece-index
+	Hash   []byte   // 20-byte long SHA1-hash of the piece-data, extracted from `.torrent` file
+	Length uint32   //  size of piece
+	Blocks []*Block // blocks
+	Status uint8    // status of the piece - exist (default), requested, downloaded, failed
 }
 
 // WriteToFiles .
-func (p *Piece) WriteToFiles(data []byte) error {
-	fpth := Torr.Files[0].Path
+func (p *Piece) WriteToFiles(data []byte) (int, error) {
 
-	// TODO: only single file for now
-	// if !fileExist(fpth) {
-	// 	panic("file doesn't exist")
-	// 	// it will be created beforehand fo rnow
-	// }
+	fs := Torr.WhichFiles(int(p.Index))
 
-	f, err := os.OpenFile(fpth, os.O_RDWR, os.ModeAppend)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
+	// lastend := 0
 
-	off := int64(p.Index * Torr.PieceLen)
+	// `psoff` and `peoff` are the piece start offset and
+	// piece end offset in the full concatinated data
+	psoff := int(p.Length * p.Index)
+	peoff := psoff + int(p.Length)
 
-	nw, err := f.WriteAt(data, off)
-	if err != nil {
-		return fmt.Errorf("%v", err)
-	}
+	for _, f := range fs {
+		var ws int
+		var we int
+		var off int
 
-	fmt.Printf("DATA: %+v\nPIDX=%v\n", data[:40], p.Index)
+		if f.Start > psoff {
+			ws = f.Start
+			off = 0
+		} else {
+			ws = psoff
+			off = psoff - f.Start
+		}
 
-	fmt.Printf("WRITTEN: %+v bytes, offset %v to %v\n", nw, off, int(off)+nw)
+		if f.Start+f.Length > peoff {
+			we = peoff
+		} else {
+			we = f.Start + f.Length
+		}
 
-	p.Downloaded = true
-
-	// // fmt.Printf
-	// b, err := ioutil.ReadFile(Torr.Files[0].Path)
-	// if err != nil {
-	// 	logrus.Warnf("read error, %v\n", err)
-	// }
-
-	b := make([]byte, nw)
-	_, err = f.ReadAt(b, off)
-	if err != nil {
-		logrus.Warnf("%+v\n", err)
+		_, err := f.WriteData(data[ws:we], off)
+		if err != nil {
+			return 0, err
+		}
 	}
 
-	fmt.Printf("FILE: chunk length=%v\n", len(b))
-	fmt.Printf("FILE: dataf=%v\n", b[:40])
+	fmt.Printf("%+v\n", fs[0])
 
-	return nil
+	// os.Exit(0
+	return int(p.Length), nil
+
 }
 
 // fileExist .
@@ -131,18 +169,9 @@ func (p *Piece) GenBlocks() {
 			PieceIndex: p.Index,
 			Begin:      uint32(i * LengthOfBlock),
 			Length:     uint32(ln),
-			Status:     BlockExist,
 		})
 	}
 }
-
-// Constants corrosponding to status enum value of of `Block`
-const (
-	BlockExist      uint8 = 0 // when piece whave been requested to a peer
-	BlockRequested  uint8 = 1 // when piece whave been requested to a peer
-	BlockDownloaded uint8 = 2 // when piece download has successfully been completed
-	BlockFailed     uint8 = 3 // when piece download has not been successful (failed once)
-)
 
 /*
 LengthOfBlock is the length of each block. While downloading pieces
@@ -156,8 +185,6 @@ type Block struct {
 	PieceIndex uint32 // piece-index of the piece that the block is a part of
 	Begin      uint32 // offset where the block starts within the piece (that it's a part of)
 	Length     uint32 // length of the block in bytes
-	Status     uint8  // status of the block - exist (default), requested, downloaded, failed
-	Data       []byte
 }
 
 // requestMsgBuf .
@@ -188,6 +215,43 @@ type Torrent struct {
 	PieceLen uint32   // length of each piece in bytes (equal)
 	Pieces   []*Piece // list containing pieces of data
 	Size     int      // total size
+	PFMap    [][]*File
+}
+
+// WhichFiles .
+func (t *Torrent) WhichFiles(pidx int) []*File {
+	return t.PFMap[pidx]
+}
+
+// PRFMap -> Piece Range / File map
+
+// GenPFMap .
+func (t *Torrent) GenPFMap() {
+	mmap := make([][]*File, t.Size/int(t.PieceLen))
+
+	for _, f := range t.Files {
+		// fpof, first piece's index of this file
+		// lpof, last piece's index of this file
+		fpof, lpof := t.getFileOffset(f)
+
+		for x := fpof; x <= lpof; x++ {
+			mmap[int(x)] = append(mmap[int(x)], f)
+		}
+	}
+
+	t.PFMap = mmap
+}
+
+func (t *Torrent) getFileOffset(f *File) (int, int) {
+	s := int(math.Ceil(float64(f.Start / int(t.PieceLen))))
+	e := int(math.Ceil(float64((f.Start + f.Length) / int(t.PieceLen))))
+
+	if (f.Start+f.Length)%int(t.PieceLen) == 0 {
+		return s, e - 1
+	} else {
+		return s, e
+	}
+
 }
 
 // Read reads a bencode dictionary and populates
@@ -232,7 +296,7 @@ func (t *Torrent) Read(dict *map[string]interface{}) error {
 	}
 
 	// total size of the content, to be downloaded
-	t.Size = int(t.PieceLen) * len(pieces)
+	t.Size = int(t.PieceLen) * len(t.Pieces)
 
 	// checking if `info["files"]` property exists. If "yes" then
 	// it's a multi file downloader, else single-file downloader
@@ -242,6 +306,8 @@ func (t *Torrent) Read(dict *map[string]interface{}) error {
 
 		// converting the value at `info["files"]` into a list
 		files := info["files"].([]interface{})
+
+		off := 0
 
 		for _, file := range files {
 			// converting each element into dictionaries,
@@ -255,11 +321,16 @@ func (t *Torrent) Read(dict *map[string]interface{}) error {
 				fp = path.Join(fp, p.(string))
 			}
 
+			lng := int(uint32(f["length"].(int64)))
+
 			// appending all the files in `Piles` peroperty of `Torrent`
 			t.Files = append(t.Files, &File{
 				Path:   fp,
-				Length: uint32(f["length"].(int64)),
+				Start:  off,
+				Length: lng,
 			})
+
+			off += lng
 		}
 	} else {
 		t.Mode = TorrSingleFile // single-file mode
@@ -268,11 +339,10 @@ func (t *Torrent) Read(dict *map[string]interface{}) error {
 		// for single-file mode length will always be 1
 		t.Files = append(t.Files, &File{
 			Path:   info["name"].(string),
-			Length: uint32(info["length"].(int64)),
+			Start:  0,
+			Length: int(uint32(info["length"].(int64))),
 		})
 	}
 
 	return nil
 }
-
-// func (t *Torrent) WriteToFiles(data []byte, )

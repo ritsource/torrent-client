@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -56,7 +57,7 @@ func (p *Peer) IsAlive() bool {
 
 // IsFree .
 func (p *Peer) IsFree() bool {
-	return p.IsReady() && !p.Downloading
+	return !p.Downloading
 }
 
 // HasPiece .
@@ -265,19 +266,47 @@ func (p *Peer) ReadBitfield(payld []byte) error {
 	return nil
 }
 
-// DownloadPiece .
+// ErrPeerDisconnected .
+var ErrPeerDisconnected = errors.New("peer connection has been closed")
+
+/*
+DownloadPiece downloads all the `Block`s of data of a given `Piece` from the `Peer`,
+and writes the data to the appropriate files.
+
+If `Peer` gets disconnected then the method returns a `ErrPeerDisconnected` error,
+so that the client can reestablish connection with the `Peer`
+*/
 func (p *Peer) DownloadPiece(piece *Piece) (int, error) {
-	bidx := 0
-	downs := make([]byte, 0, piece.Length)
+	bidx := 0                              // index of the block to be requested
+	downs := make([]byte, 0, piece.Length) // holds all the downloaded data
+
+	// errcnt counts the number download error for a single block of data,
+	// so if it excides teh limit the method can throw an error
 	errcnt := 0
 
+	// managing the states of `Peer` and `Piece` over the course of download
+	piece.Status = PieceStatusRequested
 	p.Downloading = true
 	defer func(p *Peer) {
+		// this method `peer.DownloadPiece()` doesn't set the `piece.Status` value
+		// to `PieceStatusDownloaded`, it's to be down after the file write, so by
+		// the `piece.WriteToFiles()` method. So, `peer.DownloadPiece()` only checks
+		// that `piece.Status` is equal to `PieceStatusDownloaded` or not, if not
+		// then it sets the value of `piece.Status` to `PieceStatusFailed`
+		if piece.Status != PieceStatusDownloaded {
+			piece.Status = PieceStatusFailed
+		}
 		p.Downloading = false
 	}(p)
 
-	for p.IsAlive() {
+	for {
+		if !p.IsAlive() {
+			// returning `ErrPeerDisconnected` error if `Peer` connection is not up
+			return 0, ErrPeerDisconnected
+		}
+
 		if errcnt > 3 {
+			// returning error when download failures for a single block exceeds the limit (3)
 			return 0, fmt.Errorf("download error limit exceeded (%v), for block-index=%v", errcnt, bidx)
 		}
 
@@ -294,7 +323,6 @@ func (p *Peer) DownloadPiece(piece *Piece) (int, error) {
 		}
 		errcnt = 0
 
-		// fmt.Println(b[:20])
 		downs = append(downs, b...)
 
 		bidx++
@@ -310,12 +338,7 @@ func (p *Peer) DownloadPiece(piece *Piece) (int, error) {
 		return 0, fmt.Errorf("hash doesn't match")
 	}
 
-	err = piece.WriteToFiles(downs)
-	if err != nil {
-		logrus.Errorf("%v\n", err)
-	}
-
-	return 0, nil
+	return piece.WriteToFiles(downs)
 }
 
 // RequestBlock .

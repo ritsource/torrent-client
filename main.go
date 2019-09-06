@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"time"
 
@@ -22,13 +21,32 @@ func main() {
 		logrus.Panicf("%v\n", err)
 	}
 
-	peers, err := src.GetPeers()
-	if err != nil {
-		logrus.Panicf("%v\n", err)
-	}
+	ch1 := make(chan error)
+	var peers []*src.Peer
+
+	go func(prs *[]*src.Peer, c chan error) {
+		*prs, err = src.GetPeers()
+		c <- err
+	}(&peers, ch1)
 
 	for _, piece := range src.Torr.Pieces {
 		piece.GenBlocks()
+	}
+
+	src.Torr.GenPFMap()
+
+	// for pidx, fs := range src.Torr.PFMap {
+	// 	fmt.Printf("%v | ", pidx)
+	// 	for _, f := range fs {
+	// 		fmt.Printf("\t%v", f)
+	// 	}
+	// 	fmt.Printf("\n")
+	// }
+	// return
+
+	err = <-ch1
+	if err != nil {
+		logrus.Panicf("%v\n", err)
 	}
 
 	seeders := Seeders{}
@@ -94,39 +112,18 @@ func (sdrs *Seeders) Find(peers []*src.Peer) {
 func (sdrs *Seeders) Download() {
 	pidx := 0
 	sidx := 0
-	// pcovered := 0
-
-	downloaded := 0
-
-	go func(d *int) {
-		for {
-			time.Sleep(30 * time.Second)
-			fmt.Printf("*******************\n\n Downloaded = %v \n\n*****\n", *d)
-			if *d >= len(src.Torr.Pieces) {
-				break
-			}
-		}
-	}(&downloaded)
 
 	for {
 		time.Sleep(100 * time.Millisecond)
 
 		if pidx >= len(src.Torr.Pieces) {
-			x := false
-			d := 0
-			for _, p := range src.Torr.Pieces {
-				if p.Status == src.BlockDownloaded {
-					d++
-				} else {
-					x = true
-				}
-			}
-
-			if x == false {
+			dn, comp := isDownComplete(src.Torr.Pieces)
+			if comp == true {
+				logrus.Infof("all [%v] pieces has been downloaded **[DONE]**", dn)
 				break
 			}
 
-			downloaded = d
+			logrus.Infof("[%v] out of [%v] pieces has been downloaded", dn, len(src.Torr.Pieces))
 			pidx = 0
 		}
 
@@ -135,30 +132,56 @@ func (sdrs *Seeders) Download() {
 		}
 
 		piece := src.Torr.Pieces[pidx]
-		piecefree := piece.Status == src.BlockExist || piece.Status == src.BlockFailed
 
-		// fmt.Println(pidx, sidx)
-		if s := (*sdrs)[sidx]; s.IsFree() && s.HasPiece(pidx) && piecefree {
+		// p2breq := piece.Status == src.PieceStatusDefault || piece.Status == src.PieceStatusFailed
 
-			go func(s *src.Peer, p *src.Piece) {
-				fmt.Printf("requesting %v to %v:%v\n", p.Index, s.IP, s.Port)
-				p.Status = src.BlockRequested
+		if piece.Status == src.PieceStatusDownloaded || piece.Status == src.PieceStatusRequested {
+			pidx++
+			continue
+		}
 
-				_, err := s.DownloadPiece(p)
-				if err != nil {
-					p.Status = src.BlockFailed
-					logrus.Errorf("%v\n", err)
-					return
-				}
+		seeder := (*sdrs)[sidx]
 
-				p.Status = src.BlockDownloaded
-			}(s, piece)
+		if seeder.IsFree() && seeder.HasPiece(pidx) {
+			logrus.Infof("requesting piece of index %v | to %v:%v\n", piece.Index, seeder.IP, seeder.Port)
+			go GetPiece(seeder, piece)
 
 			pidx++
 
+		} else if !seeder.IsAlive() {
+			go seeder.Ping()
 		}
 
 		sidx++
 
+	}
+}
+
+// isDownComplete .
+func isDownComplete(pieces []*src.Piece) (int, bool) {
+	boo := true // boo == true, all pieces are downloaded (none left)
+	dn := 0     // number of pieces to be downloaded
+	for _, p := range pieces {
+		if p.Status == src.PieceStatusDownloaded {
+			dn++
+		} else {
+			// if any piece is yet to be downloaded, set `boo = false`
+			boo = false
+		}
+	}
+
+	return dn, boo
+}
+
+// GetPiece .
+func GetPiece(s *src.Peer, p *src.Piece) {
+	_, err := s.DownloadPiece(p)
+	switch err {
+	case nil:
+		// pass
+	case src.ErrPeerDisconnected:
+		go s.Ping()
+	default:
+		logrus.Errorf("%v\n", err)
 	}
 }
