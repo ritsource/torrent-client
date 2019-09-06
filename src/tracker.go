@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"path"
 	"strconv"
 
 	"github.com/marksamman/bencode"
@@ -53,7 +52,6 @@ func ConnReqUDP() (uint64, uint32, error) {
 		return 0, 0, err
 	}
 
-	fmt.Println("Opaque", path.Join(Torr.Announce.Host, Torr.Announce.Path))
 	// UDP protocol doesn't esablish any connection between client and server, the
 	// connection doesn't actually represents any actual connection in transition layer
 	conn, err := net.Dial("udp", Torr.Announce.String())

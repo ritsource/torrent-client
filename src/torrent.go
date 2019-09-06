@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 
 	"github.com/marksamman/bencode"
 	"github.com/sirupsen/logrus"
@@ -73,6 +74,10 @@ func (f *File) WriteData(bs []byte, off int) (int, error) {
 
 	var file *os.File
 	if exist {
+		err := os.MkdirAll(filepath.Dir(f.Path), os.ModePerm)
+		if err != nil {
+			return 0, err
+		}
 		file, err = os.Create(f.Path)
 	} else {
 		file, err = os.Open(f.Path)
@@ -248,9 +253,8 @@ func (t *Torrent) getFileOffset(f *File) (int, int) {
 
 	if (f.Start+f.Length)%int(t.PieceLen) == 0 {
 		return s, e - 1
-	} else {
-		return s, e
 	}
+	return s, e
 
 }
 
@@ -260,6 +264,7 @@ func (t *Torrent) Read(dict *map[string]interface{}) error {
 	var err error
 
 	// reading the announce-url from bencode metainfo dictionary
+	// fmt.Println((*dict)["announce"].(string))
 	t.Announce, err = url.Parse((*dict)["announce"].(string))
 	if err != nil {
 		return err
@@ -306,6 +311,7 @@ func (t *Torrent) Read(dict *map[string]interface{}) error {
 
 		// converting the value at `info["files"]` into a list
 		files := info["files"].([]interface{})
+		dirnm := info["name"].(string)
 
 		off := 0
 
@@ -325,7 +331,7 @@ func (t *Torrent) Read(dict *map[string]interface{}) error {
 
 			// appending all the files in `Piles` peroperty of `Torrent`
 			t.Files = append(t.Files, &File{
-				Path:   fp,
+				Path:   path.Join(dirnm, fp),
 				Start:  off,
 				Length: lng,
 			})
