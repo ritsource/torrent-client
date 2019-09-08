@@ -11,7 +11,7 @@ import (
 	"strconv"
 
 	"github.com/marksamman/bencode"
-	"github.com/sirupsen/logrus"
+	"github.com/ritwik310/torrent-client/output"
 )
 
 // RequestPeerNum ...
@@ -66,7 +66,7 @@ func ConnReqUDP() (uint64, uint32, error) {
 		return 0, 0, err
 	}
 
-	fmt.Printf("written %v bytes as udp connection request\n", nw)
+	output.DevInfof("written %v bytes as udp connection request\n", nw)
 
 	// reading on the connection (waiting for teh server to respond in
 	// actual) for a UDP-connection-response recieved from the server
@@ -76,7 +76,7 @@ func ConnReqUDP() (uint64, uint32, error) {
 		return 0, 0, err
 	}
 
-	logrus.Infof("read %v bytes as udp connection response\n", nr)
+	output.DevInfof("read %v bytes as udp connection response\n", nr)
 
 	// the connection response includes data that is required in the announce request
 	// `action` (32-bit integer, value = 0), `transaction_id` (32-bit integer, same value
@@ -126,7 +126,7 @@ func GetPeersUDP(addr string, connID uint64, tranID uint32) ([]*Peer, error) {
 	if err != nil {
 		return []*Peer{}, err
 	}
-	fmt.Printf("written %v bytes to as udp announce request\n", nw)
+	output.DevInfof("written %v bytes to as udp announce request\n", nw)
 
 	// reading tracker response
 	resp := make([]byte, 20+RequestPeerNum*6) // 20 + `RequestPeerNum` * 6 is the largest possible value for response (cause `RequestPeerNum` is finite)
@@ -135,12 +135,12 @@ func GetPeersUDP(addr string, connID uint64, tranID uint32) ([]*Peer, error) {
 		return []*Peer{}, err
 	}
 
-	fmt.Printf("read %v bytes as udp announce response\n", nr)
+	output.DevInfof("read %v bytes as udp announce response\n", nr)
 	resp = resp[:nr] // skipping rest of the bytes, only populated ones contains all the data
 
 	// if len(resp) < 20, somethings wrong with the response
 	if len(resp) < 20 {
-		fmt.Printf("the announce response length is shorter than 20 bytes")
+		output.DevInfof("the announce response length is shorter than 20 bytes")
 		return []*Peer{}, err
 	}
 
@@ -163,8 +163,8 @@ func GetPeersUDP(addr string, connID uint64, tranID uint32) ([]*Peer, error) {
 
 	// interval := BE.Uint32(resp[8:12])
 	// leechers := BE.Uint32(resp[12:16])
-	numseed := BE.Uint32(resp[16:20])
-	fmt.Printf("number of seeders found = %v *****\n", numseed)
+	// numseed := BE.Uint32(resp[16:20])
+	// output.DevInfof("number of seeders found = %v *****\n", numseed)
 
 	// [After 20-bytes] - the rest contains peer (seeder) information, 6 bytes for each peer
 	// first 4 bytes are IP address and last 2 bytes are port. Reading the peer info,
@@ -211,7 +211,7 @@ func udpConnPacket(tranID uint32) ([]byte, error) {
 	for _, v := range el {
 		err := binary.Write(buf, binary.BigEndian, v)
 		if err != nil {
-			logrus.Errorf("buffer write failed for UDP connection request\n")
+			output.DevErrorf("buffer write failed for UDP connection request\n")
 			return []byte{}, err
 		}
 	}
@@ -262,7 +262,7 @@ func udpAnnouncePacket(connID uint64, tranID uint32) ([]byte, error) {
 		// appending each element to the buffer
 		err := binary.Write(buf, binary.BigEndian, v)
 		if err != nil {
-			logrus.Errorf("buffer write failed for UDP announce request\n")
+			output.DevErrorf("buffer write failed for UDP announce request\n")
 			return []byte{}, err
 		}
 	}
@@ -311,7 +311,8 @@ func GetPeersHTTP() ([]*Peer, error) {
 	// decoding the data got back from in the response
 	data, err := bencode.Decode(resp.Body)
 	if err != nil {
-		logrus.Panic(err)
+		output.DevErrorf("unable to decode the tracker response data, %v", err)
+		return []*Peer{}, err
 	}
 
 	// checking if tracker rejected the request
@@ -321,7 +322,7 @@ func GetPeersHTTP() ([]*Peer, error) {
 
 	// if there's any warnning
 	if v, ok := data["warning message"]; ok {
-		logrus.Warnf("%v\n", v)
+		output.DevWarnf("%v\n", v)
 	}
 
 	// to hold pointers to peers

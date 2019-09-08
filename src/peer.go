@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"github.com/ritwik310/torrent-client/output"
 )
 
 // PeerProtocolName is version 1 peer protocol name, required in message construction
@@ -97,7 +97,7 @@ func (p *Peer) Ping() error {
 	go func(p *Peer) {
 		time.Sleep(50 * time.Second)
 		if p.IsAlive() && !p.IsReady() {
-			logrus.Infof("peer ping timeout, disconnecting.. | %v:%v\n", p.IP, p.Port)
+			output.DevInfof("peer ping timeout, disconnecting.. | %v:%v\n", p.IP, p.Port)
 			p.Disconnect()
 		}
 	}(p)
@@ -109,7 +109,7 @@ func (p *Peer) Ping() error {
 	var err error
 	p.Conn, err = net.Dial("tcp", addr)
 	if err != nil {
-		logrus.Warnf("couldn't establish TCP connection, %+v | %v:%v\n", err, p.IP, p.Port)
+		output.DevWarnf("couldn't establish TCP connection, %+v | %v:%v\n", err, p.IP, p.Port)
 		return err
 	}
 	p.Connected = true
@@ -117,14 +117,14 @@ func (p *Peer) Ping() error {
 	// building the handshake message buffer
 	hsbuf, err := handshakeMsgBuf()
 	if err != nil {
-		logrus.Warnf("couldn't build the handshake buffer, %v | %v:%v\n", err, p.IP, p.Port)
+		output.DevWarnf("couldn't build the handshake buffer, %v | %v:%v\n", err, p.IP, p.Port)
 		return err
 	}
 
 	// writing the handshake message on peer connection
 	_, err = p.Conn.Write(hsbuf.Bytes())
 	if err != nil {
-		logrus.Warnf("couldn't write handshake request, %v | %v:%v\n", err, p.IP, p.Port)
+		output.DevWarnf("couldn't write handshake request, %v | %v:%v\n", err, p.IP, p.Port)
 		return err
 	}
 
@@ -132,18 +132,18 @@ func (p *Peer) Ping() error {
 	d := make([]byte, 1024)
 	nr, err := p.Conn.Read(d)
 	if err != nil {
-		logrus.Warnf("couldn't to read handshake response, %v | %v:%v\n", err, p.IP, p.Port)
+		output.DevWarnf("couldn't to read handshake response, %v | %v:%v\n", err, p.IP, p.Port)
 		p.Disconnect()
 		return err
 	}
 
 	// checkign if the recieved messages is a valid handshake message or not
 	if !isHsMsg(d[:nr]) {
-		logrus.Warnf("invalid handshake message, disconnecting.. | %v:%v\n", p.IP, p.Port)
+		output.DevWarnf("invalid handshake message, disconnecting.. | %v:%v\n", p.IP, p.Port)
 		p.Disconnect()
 	}
 
-	logrus.Infof("handshake-message, %v bytes | %v:%v\n", nr, p.IP, p.Port)
+	output.DevInfof("handshake-message, %v bytes | %v:%v\n", nr, p.IP, p.Port)
 
 	// now, reading from the connection, waitign for peer to
 	// write `bitfield` and `unchoke` message
@@ -152,7 +152,7 @@ func (p *Peer) Ping() error {
 		// concatinates and returns it as a single message
 		msg, err := p.Read()
 		if err != nil {
-			logrus.Warnf("%v, disconnecting.. | %v:%v\n", err, p.IP, p.Port)
+			output.DevWarnf("%v, disconnecting.. | %v:%v\n", err, p.IP, p.Port)
 			p.Disconnect()
 			return err
 		}
@@ -160,7 +160,7 @@ func (p *Peer) Ping() error {
 		// extracting length, message-id and payload from the message
 		lng, id, payld, err := extractMsg(msg)
 		if err != nil {
-			logrus.Warnf("%v, disconnecting.. | %v:%v\n", err, p.IP, p.Port)
+			output.DevWarnf("%v, disconnecting.. | %v:%v\n", err, p.IP, p.Port)
 			p.Disconnect()
 			return err
 		}
@@ -169,18 +169,18 @@ func (p *Peer) Ping() error {
 		// expecting the peer to write `bitfield` and `unchoke` message
 		switch id {
 		case uint8(0):
-			logrus.Infof("choke-message, %v bytes | %v:%v\n", lng+4, p.IP, p.Port)
+			output.DevInfof("choke-message, %v bytes | %v:%v\n", lng+4, p.IP, p.Port)
 			p.Disconnect()
 		case uint8(1):
-			logrus.Infof("unchoke-message, %v bytes | %v:%v\n", lng+4, p.IP, p.Port)
+			output.DevInfof("unchoke-message, %v bytes | %v:%v\n", lng+4, p.IP, p.Port)
 			p.UnChoked = true
 		case uint8(4):
-			logrus.Infof("have-message, %v bytes | %v:%v\n", lng+4, p.IP, p.Port)
+			output.DevInfof("have-message, %v bytes | %v:%v\n", lng+4, p.IP, p.Port)
 		case uint8(5):
-			logrus.Infof("bitfield-message, %v bytes | %v:%v\n", lng+4, p.IP, p.Port)
+			output.DevInfof("bitfield-message, %v bytes | %v:%v\n", lng+4, p.IP, p.Port)
 			err := p.ReadBitfield(payld)
 			if err != nil {
-				logrus.Warnf("bitfield read error, %v, disconnecting.. | %v:%v\n", err, p.IP, p.Port)
+				output.DevWarnf("bitfield read error, %v, disconnecting.. | %v:%v\n", err, p.IP, p.Port)
 				p.Disconnect()
 				return err
 			}
@@ -210,7 +210,7 @@ func (p *Peer) Read() ([]byte, error) {
 		case io.EOF:
 			return nil, fmt.Errorf("message read err, %v", err)
 		default:
-			logrus.Warnf("%v | %v:%v\n", err, p.IP, p.Port)
+			output.DevWarnf("%v | %v:%v\n", err, p.IP, p.Port)
 			return nil, err
 		}
 
@@ -266,7 +266,7 @@ func (p *Peer) ReadBitfield(payld []byte) error {
 	return nil
 }
 
-// ErrPeerDisconnected .
+// ErrPeerDisconnected has to be thrown when peer messaging fails because of closed peer connection
 var ErrPeerDisconnected = errors.New("peer connection has been closed")
 
 /*
@@ -334,14 +334,20 @@ func (p *Peer) DownloadPiece(piece *Piece) (int, error) {
 	}
 
 	if !reflect.DeepEqual(hash, piece.Hash) {
-		fmt.Printf("Hash doesn't match, piece-index = %v, %x != %x | %v:%v\n", piece.Index, hash, piece.Hash, p.IP, p.Port)
+		output.DevErrorf("Hash doesn't match, piece-index = %v, %x != %x | %v:%v\n", piece.Index, hash, piece.Hash, p.IP, p.Port)
 		return 0, fmt.Errorf("hash doesn't match")
 	}
 
-	return piece.WriteToFiles(downs)
+	nw, err := piece.WriteToFiles(downs)
+	if err != nil {
+		return nw, err
+	}
+	piece.Status = PieceStatusDownloaded
+	return nw, err
 }
 
-// RequestBlock .
+// RequestBlock downloads a single block from a peer. It sends a request message and
+// waits for the peer to respond with the data, and returns teh data (block data)
 func (p *Peer) RequestBlock(block *Block) ([]byte, error) {
 	buf, err := block.RequestBuff()
 	if err != nil {
@@ -355,7 +361,7 @@ func (p *Peer) RequestBlock(block *Block) ([]byte, error) {
 
 	msg, err := p.Read()
 	if err != nil {
-		logrus.Warnf("%v, disconnecting.. | %v:%v\n", err, p.IP, p.Port)
+		output.DevWarnf("%v, disconnecting.. | %v:%v\n", err, p.IP, p.Port)
 		p.Disconnect()
 		return nil, err
 	}
@@ -363,14 +369,14 @@ func (p *Peer) RequestBlock(block *Block) ([]byte, error) {
 	// extracting length, message-id and payload from the message
 	lng, id, payld, err := extractMsg(msg)
 	if err != nil {
-		logrus.Warnf("%v, disconnecting.. | %v:%v\n", err, p.IP, p.Port)
+		output.DevWarnf("%v, disconnecting.. | %v:%v\n", err, p.IP, p.Port)
 		p.Disconnect()
 		return nil, err
 	}
 
 	// expecting "piece" message, (id==7)
 	if id == uint8(7) && len(payld) > 8 {
-		logrus.Infof("piece-message, %v bytes | %v:%v\n", lng, p.IP, p.Port)
+		output.DevInfof("piece-message, %v bytes | %v:%v\n", lng, p.IP, p.Port)
 
 		pidx := binary.BigEndian.Uint32(payld[:4]) // piece index
 		beg := binary.BigEndian.Uint32(payld[4:8])

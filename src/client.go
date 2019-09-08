@@ -1,11 +1,12 @@
 package src
 
 import (
+	"fmt"
 	"math/rand"
 	"net"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"github.com/ritwik310/torrent-client/output"
 )
 
 // Something ...
@@ -28,7 +29,7 @@ func init() {
 	// the client's IP-address
 	ClientIP, err = GetClientIP()
 	if err != nil {
-		logrus.Panicf("%v\n", err)
+		panic(fmt.Errorf("%v", err))
 	}
 
 	// in this application, we are not gonna focused
@@ -60,7 +61,7 @@ func GenPeerID() string {
 func GetClientIP() (net.IP, error) {
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
-		logrus.Fatalf("couldn't read client's IP-address, %v\n", err)
+		output.DevErrorf("couldn't read client's IP-address, %v\n", err)
 		return nil, err
 	}
 	defer conn.Close()

@@ -3,10 +3,11 @@ package src
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"math"
 	"os"
 	"path/filepath"
+
+	"github.com/ritwik310/torrent-client/output"
 )
 
 // Constants corrosponding to `Status` enum value of of `Piece`
@@ -53,7 +54,7 @@ func (p *Piece) GenBlocks() {
 // WriteToFiles .
 func (p *Piece) WriteToFiles(data []byte) (int, error) {
 
-	fmt.Printf("Piece-Index=%v\n", p.Index)
+	output.DevInfof("Piece-Index=%v\n", p.Index)
 
 	// retrieving the files where the data has to be written, the method
 	// `Torr.WhichFiles` returns pointer to all the files that a piece covers

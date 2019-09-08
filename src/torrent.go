@@ -7,7 +7,6 @@ import (
 	"path"
 
 	"github.com/marksamman/bencode"
-	"github.com/sirupsen/logrus"
 )
 
 // Torr holds teh values read from
@@ -26,7 +25,6 @@ func ReadFile(fn string) error {
 	// tracker, in a bencode dictionary
 	f, err := os.Open(fn)
 	if err != nil {
-		logrus.Errorf("unable to read the `.torrent` file")
 		return err
 	}
 	defer f.Close()
@@ -34,7 +32,6 @@ func ReadFile(fn string) error {
 	// decoding bencode dictionary into a `map[string]interface{}`
 	dict, err := bencode.Decode(f)
 	if err != nil {
-		logrus.Errorf("unable to decode the `.torrent` file")
 		return err
 	}
 
