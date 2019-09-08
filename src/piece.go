@@ -3,6 +3,7 @@ package src
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -51,6 +52,8 @@ func (p *Piece) GenBlocks() {
 
 // WriteToFiles .
 func (p *Piece) WriteToFiles(data []byte) (int, error) {
+
+	fmt.Printf("Piece-Index=%v\n", p.Index)
 
 	// retrieving the files where the data has to be written, the method
 	// `Torr.WhichFiles` returns pointer to all the files that a piece covers
@@ -145,16 +148,14 @@ type File struct {
 	Start  int    // start-offset of the file-data in the full/all data (all pieces concatenated)
 }
 
-// Create .
+// Create creates a file with the directories that it requires to be created
 func (f *File) Create() error {
 	err := os.MkdirAll(filepath.Dir(f.Path), os.ModePerm)
 	if err != nil {
 		return err
 	}
 
-	fl, err := os.Create(f.Path)
-	defer fl.Close()
-
+	_, err = os.Create(f.Path)
 	return err
 }
 
@@ -163,9 +164,18 @@ func (f *File) Create() error {
 func (f *File) WriteData(bs []byte, off int) (int, error) {
 	var fl *os.File // os.File, to be written data on
 
-	// `f.Create` creates a file if doesn't exist
-	err := f.Create()
-	if err != nil {
+	// checking if file exist or not
+	_, err := os.Stat(f.Path)
+	os.IsNotExist(err)
+	if _, err := os.Stat(f.Path); err == nil {
+		// pass
+	} else if os.IsNotExist(err) {
+		// create a file (with the folders) if doesn't exist
+		err := f.Create()
+		if err != nil {
+			return 0, err
+		}
+	} else {
 		return 0, err
 	}
 
