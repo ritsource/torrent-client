@@ -343,7 +343,7 @@ func (p *Peer) DownloadPiece(piece *Piece) (int, error) {
 
 // RequestBlock .
 func (p *Peer) RequestBlock(block *Block) ([]byte, error) {
-	buf, err := block.requestMsgBuf()
+	buf, err := block.RequestBuff()
 	if err != nil {
 		return nil, fmt.Errorf("buffer build error, %v", err)
 	}

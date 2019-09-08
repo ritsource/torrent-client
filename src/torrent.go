@@ -1,14 +1,10 @@
 package src
 
 import (
-	"bytes"
-	"encoding/binary"
-	"fmt"
 	"math"
 	"net/url"
 	"os"
 	"path"
-	"path/filepath"
 
 	"github.com/marksamman/bencode"
 	"github.com/sirupsen/logrus"
@@ -45,163 +41,6 @@ func ReadFile(fn string) error {
 	// populating `Torr` with data
 	// read from the decoded dictionary
 	return Torr.Read(&dict)
-}
-
-// File holds value for every file to be downloaded
-type File struct {
-	Path   string // the path where the file needs to be written
-	Start  int
-	Length int // size of the file (in bytes)
-}
-
-// IsExist .
-func (f *File) IsExist() (bool, error) {
-	if _, err := os.Stat(f.Path); err == nil {
-		return true, nil
-	} else if os.IsNotExist(err) {
-		return false, nil
-	} else {
-		return false, err
-	}
-}
-
-// WriteData .
-func (f *File) WriteData(bs []byte, off int) (int, error) {
-	exist, err := f.IsExist()
-	if err != nil {
-		return 0, err
-	}
-
-	var file *os.File
-	if exist {
-		err := os.MkdirAll(filepath.Dir(f.Path), os.ModePerm)
-		if err != nil {
-			return 0, err
-		}
-		file, err = os.Create(f.Path)
-	} else {
-		file, err = os.Open(f.Path)
-	}
-
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
-
-	return file.WriteAt(bs, int64(off))
-}
-
-// Constants corrosponding to `Status` enum value of of `Piece`
-const (
-	PieceStatusDefault    uint8 = 0 // default state, 0 when a piece is created
-	PieceStatusRequested  uint8 = 1 // when the piece have been requested to a peer
-	PieceStatusDownloaded uint8 = 2 // when the piece download has successfully been completed
-	PieceStatusFailed     uint8 = 3 // when the piece download has not been successful (failed atleast once)
-)
-
-// Piece represents an individual piece of data
-type Piece struct {
-	Index  uint32   // piece-index
-	Hash   []byte   // 20-byte long SHA1-hash of the piece-data, extracted from `.torrent` file
-	Length uint32   //  size of piece
-	Blocks []*Block // blocks
-	Status uint8    // status of the piece - exist (default), requested, downloaded, failed
-}
-
-// WriteToFiles .
-func (p *Piece) WriteToFiles(data []byte) (int, error) {
-
-	fs := Torr.WhichFiles(int(p.Index))
-
-	// lastend := 0
-
-	// `psoff` and `peoff` are the piece start offset and
-	// piece end offset in the full concatinated data
-	psoff := int(p.Length * p.Index)
-	peoff := psoff + int(p.Length)
-
-	for _, f := range fs {
-		var ws int
-		var we int
-		var off int
-
-		if f.Start > psoff {
-			ws = f.Start
-			off = 0
-		} else {
-			ws = psoff
-			off = psoff - f.Start
-		}
-
-		if f.Start+f.Length > peoff {
-			we = peoff
-		} else {
-			we = f.Start + f.Length
-		}
-
-		_, err := f.WriteData(data[ws:we], off)
-		if err != nil {
-			return 0, err
-		}
-	}
-
-	fmt.Printf("%+v\n", fs[0])
-
-	// os.Exit(0
-	return int(p.Length), nil
-
-}
-
-// fileExist .
-func fileExist(fpth string) bool {
-	_, err := os.Stat(fpth)
-	return err != nil && os.IsNotExist(err)
-}
-
-// GenBlocks .
-func (p *Piece) GenBlocks() {
-	n := int(math.Ceil(float64(p.Length / uint32(LengthOfBlock))))
-
-	for i := 0; i < n; i++ {
-		var ln int
-		if i == n-1 && int(p.Length)%LengthOfBlock != 0 {
-			ln = int(p.Length) % LengthOfBlock
-		} else {
-			ln = LengthOfBlock
-		}
-
-		p.Blocks = append(p.Blocks, &Block{
-			PieceIndex: p.Index,
-			Begin:      uint32(i * LengthOfBlock),
-			Length:     uint32(ln),
-		})
-	}
-}
-
-/*
-LengthOfBlock is the length of each block. While downloading pieces
-from the peers, we request pieces in chunks. This is called a block.
-Typically, each block happens to be 2^14 (16384) bytes in size
-*/
-var LengthOfBlock = int(math.Pow(2, 14))
-
-// Block represents a block of data (a chunk of piece)
-type Block struct {
-	PieceIndex uint32 // piece-index of the piece that the block is a part of
-	Begin      uint32 // offset where the block starts within the piece (that it's a part of)
-	Length     uint32 // length of the block in bytes
-}
-
-// requestMsgBuf .
-func (b *Block) requestMsgBuf() (*bytes.Buffer, error) {
-	buf := new(bytes.Buffer)
-	err := binary.Write(buf, binary.BigEndian, uint32(13))
-	err = binary.Write(buf, binary.BigEndian, uint8(6))     // id - request message
-	err = binary.Write(buf, binary.BigEndian, b.PieceIndex) // piece index
-	err = binary.Write(buf, binary.BigEndian, b.Begin)      //
-	err = binary.Write(buf, binary.BigEndian, b.Length)
-
-	return buf, err
 }
 
 // Constants corrosponding to file-mode enum value of `Torrent`
