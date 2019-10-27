@@ -11,7 +11,7 @@ import (
 	"strconv"
 
 	"github.com/marksamman/bencode"
-	"github.com/ritwik310/torrent-client/output"
+	"github.com/ritcrap/torrent-client/output"
 )
 
 // RequestPeerNum ...
