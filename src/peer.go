@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ritcrap/torrent-client/output"
+	"github.com/ritsource/torrent-client/output"
 )
 
 // PeerProtocolName is version 1 peer protocol name, required in message construction

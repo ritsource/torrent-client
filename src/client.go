@@ -6,7 +6,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/ritcrap/torrent-client/output"
+	"github.com/ritsource/torrent-client/output"
 )
 
 // Something ...

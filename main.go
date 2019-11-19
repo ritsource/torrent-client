@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/ritcrap/torrent-client/output"
-	"github.com/ritcrap/torrent-client/src"
+	"github.com/ritsource/torrent-client/output"
+	"github.com/ritsource/torrent-client/src"
 )
 
 var torrFn string

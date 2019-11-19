@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ritcrap/torrent-client/output"
+	"github.com/ritsource/torrent-client/output"
 )
 
 // Constants corrosponding to `Status` enum value of of `Piece`
