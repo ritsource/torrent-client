@@ -1,4 +1,4 @@
-# Write a Torrent Client in Go
+# Torrent Client in Golang
 
 <!--
 TEST CHNAGE`
@@ -226,6 +226,7 @@ Typically messaging between a client that wants to download data and a remote pe
 
 Messaging usually takes place with multiple peers at the same time, to make the download efficient. The client needs to feigure out what to request from which peer. The client need to take factors like what pieces a peer has and even distribution of requests among peers into consideration. The algorithm for requesting pieces from peers is [here](#here)
 
+<!--
 # Constructing Files from Pieces
 
 ### Single-File
@@ -235,3 +236,4 @@ Messaging usually takes place with multiple peers at the same time, to make the 
 # More to be added...
 =======
 # Torrent Client
+-->
